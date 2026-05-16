@@ -20,7 +20,8 @@ export type ScraperCredentials =
       | {
           otpLongTermToken: string;
         }
-    ));
+    ))
+  | { phoneNumber: string; password: string; otpCodeRetriever?: () => Promise<string> };
 
 export type OptInFeatures =
   | 'isracard-amex:skipAdditionalTransactionInformation'
@@ -171,6 +172,27 @@ export type ScraperOptions = ScraperBrowserOptions & {
    * Opt-in features for the scrapers, allowing safe rollout of new breaking changes.
    */
   optInFeatures?: Array<OptInFeatures>;
+
+  /**
+   * Android Virtual Device name to launch if no emulator is currently running.
+   * Only used by Android app scrapers (e.g. Pepper).
+   * If omitted, the first available AVD is used. Run `emulator -list-avds` to see options.
+   * The scraper starts the emulator headless (`-no-window`) by default. Set DEBUG_ANDROID_EMULATOR_GUI=1 to show the emulator window.
+   */
+  avdName?: string;
+
+  /**
+   * Port for the Appium server. Only used by Android app scrapers (e.g. Pepper).
+   * @default 4723
+   */
+  appiumPort?: number;
+
+  /**
+   * When the scraper launched an Android emulator itself, shut it down after terminate() (adb emu kill).
+   * No effect when an emulator was already running before ensureEmulatorRunning().
+   * @default true
+   */
+  shutdownEmulatorOnTerminate?: boolean;
 };
 
 export interface OutputDataOptions {

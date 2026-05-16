@@ -13,6 +13,14 @@ export {
 } from './scrapers/interface';
 
 export { default as OneZeroScraper } from './scrapers/one-zero';
+export { default as PepperScraper } from './scrapers/pepper/pepper';
+export type { PepperCredentials, PepperDashboardProbeResult } from './scrapers/pepper/pepper';
+export {
+  extractForeignCurrencyAmountsFromText,
+  firstIlsAmountFromCompoundText,
+  normalizePepperAccountNumber,
+  parseCurrencyAmountSnippet,
+} from './scrapers/pepper/pepper';
 
 export function getPuppeteerConfig() {
   return { chromiumRevision: '1250580' }; // https://github.com/puppeteer/puppeteer/releases/tag/puppeteer-core-v22.5.0

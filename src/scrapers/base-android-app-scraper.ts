@@ -1,0 +1,782 @@
+import { execSync, spawn, spawnSync, type ChildProcess } from 'child_process';
+import { type Browser, remote } from 'webdriverio';
+import { ScraperProgressTypes } from '../definitions';
+import { getDebug } from '../helpers/debug';
+import { resolveAndroidLauncherAppActivity } from '../helpers/android-launcher';
+import { BaseScraper } from './base-scraper';
+import { type ScraperCredentials, type ScraperOptions } from './interface';
+
+const debug = getDebug('android-app-scraper');
+const stepsDebug = getDebug('steps');
+
+const APPIUM_HOST = 'localhost';
+const DEFAULT_APPIUM_PORT = 4723;
+const DEFAULT_WAIT_MS = 15_000;
+const SCROLL_DURATION_MS = 600;
+const EMULATOR_BOOT_TIMEOUT_MS = 180_000;
+const APPIUM_READY_TIMEOUT_MS = 30_000;
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+function listAdbDeviceSerials(): string[] {
+  try {
+    const output = execSync('adb devices', { encoding: 'utf8', timeout: 2_000 });
+    return output
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => /\S+\s+device$/.test(line) && !line.startsWith('List'))
+      .map(line => line.split(/\s+/)[0]);
+  } catch {
+    return [];
+  }
+}
+
+function adbBaseArgs(): string[] {
+  const env = process.env.ANDROID_SERIAL?.trim();
+  if (env) {
+    return ['-s', env];
+  }
+  const serials = listAdbDeviceSerials();
+  if (serials.length === 1) {
+    return ['-s', serials[0]];
+  }
+  return [];
+}
+
+function listAttachedEmulatorSerials(): string[] {
+  try {
+    const output = execSync('adb devices', { encoding: 'utf8', timeout: 8_000 });
+    return output
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => /^emulator-\d+\s+device$/.test(line))
+      .map(line => line.split(/\s+/)[0]);
+  } catch {
+    return [];
+  }
+}
+
+type AndroidScraperOptions = ScraperOptions & {
+  avdName?: string;
+  appiumPort?: number;
+};
+
+type AppiumCapabilities = {
+  platformName: 'Android';
+  'appium:automationName': 'UiAutomator2';
+  'appium:appPackage': string;
+  'appium:appActivity': string;
+  'appium:noReset': boolean;
+  'appium:newCommandTimeout': number;
+  'appium:waitAppLaunch': boolean;
+  'appium:enforceXPath1': boolean;
+};
+
+export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredentials> extends BaseScraper<TCredentials> {
+  protected driver!: Browser;
+
+  private appiumProcess?: ChildProcess;
+  private ownedAppium = false;
+
+  private cachedCapabilities?: AppiumCapabilities;
+
+  private ownedEmulator = false;
+
+  private startedEmulatorSerial?: string;
+
+  protected abstract get appPackage(): string;
+
+  protected launcherActivityExplicit(): string | undefined {
+    return undefined;
+  }
+
+  private get androidOptions(): AndroidScraperOptions {
+    return this.options as AndroidScraperOptions;
+  }
+
+  private get resolvedAppiumPort(): number {
+    return this.androidOptions.appiumPort ?? DEFAULT_APPIUM_PORT;
+  }
+
+  private resetStaleUiAutomator2Servers(): void {
+    debug('Uninstalling Appium UiAutomator2 helper APKs (clears broken UiAutomation state)');
+    const adb = adbBaseArgs();
+    const pkgs = ['io.appium.uiautomator2.server', 'io.appium.uiautomator2.server.test'];
+    for (const pkg of pkgs) {
+      spawnSync('adb', [...adb, 'shell', 'am', 'force-stop', pkg], {
+        encoding: 'utf8',
+        timeout: 20_000,
+      });
+      const r = spawnSync('adb', [...adb, 'shell', 'pm', 'uninstall', pkg], {
+        encoding: 'utf8',
+        timeout: 45_000,
+      });
+      debug('pm uninstall %s exit=%s', pkg, String(r.status));
+    }
+  }
+
+  private webDriverErrorMessage(err: unknown): string {
+    if (err instanceof Error) {
+      return `${err.message}\n${err.stack ?? ''}`;
+    }
+    if (err && typeof err === 'object' && 'message' in err) {
+      return String((err as { message: unknown }).message);
+    }
+    return String(err);
+  }
+
+  private isRecoverableWebDriverInfrastructureFailure(message: string): boolean {
+    const m = message.toLowerCase();
+    return (
+      m.includes('uiautomation') ||
+      m.includes('ui automation') ||
+      m.includes('illegalstateexception') ||
+      m.includes('instrumentation process is not running') ||
+      m.includes('cannot be proxied to uiautomator2') ||
+      (m.includes('instrumentation') && (m.includes('crash') || m.includes('not running'))) ||
+      m.includes('instrumentationrunner') ||
+      m.includes('could not proxy command') ||
+      m.includes('socket hang up') ||
+      m.includes('econnrefused') ||
+      m.includes('invalid session id') ||
+      (m.includes('session') && m.includes('terminated')) ||
+      (m.includes('new session') && m.includes('could not'))
+    );
+  }
+
+  private shouldShutdownOwnedEmulator(): boolean {
+    return this.ownedEmulator && this.androidOptions.shutdownEmulatorOnTerminate !== false;
+  }
+
+  private shutdownOwnedEmulator(): void {
+    const serial = this.startedEmulatorSerial ?? listAttachedEmulatorSerials()[0];
+    if (!serial) {
+      return;
+    }
+
+    debug('adb emu kill %s (scraper-launched emulator)', serial);
+    spawnSync('adb', ['-s', serial, 'emu', 'kill'], { encoding: 'utf8', timeout: 40_000 });
+  }
+
+  private async recoverUiAutomatorSession(): Promise<void> {
+    const caps = this.cachedCapabilities;
+    if (!caps) {
+      throw new Error('Cannot recover WebDriver session (capabilities cache missing)');
+    }
+
+    debug('Recreating UiAutomator2 WebDriver session');
+    await this.driver?.deleteSession().catch(() => undefined);
+    this.resetStaleUiAutomator2Servers();
+    await sleep(3_500);
+    this.driver = await this.createDriverSession(caps);
+    await this.ensureTargetAppForeground(caps['appium:appActivity']);
+  }
+
+  private async withUiAutomatorRetry<T>(operation: () => Promise<T>): Promise<T> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await operation();
+      } catch (lastErr) {
+        const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+        if (!this.isRecoverableWebDriverInfrastructureFailure(msg) || attempt >= 2) {
+          throw lastErr;
+        }
+
+        debug('UiAutomator2 recovery pass %d/3 after: %s', attempt + 1, msg.replace(/\s+/g, ' ').slice(0, 170));
+        await this.recoverUiAutomatorSession();
+      }
+    }
+
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+
+  private async createDriverSession(capabilities: AppiumCapabilities): Promise<Browser> {
+    const opts = {
+      hostname: APPIUM_HOST,
+      port: this.resolvedAppiumPort,
+      capabilities,
+      logLevel: this.options.verbose ? ('info' as const) : ('silent' as const),
+    };
+
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await remote(opts);
+      } catch (e) {
+        lastErr = e;
+        const msg = this.webDriverErrorMessage(e);
+        const recoverable = this.isRecoverableWebDriverInfrastructureFailure(msg);
+        if (!recoverable || attempt >= 2) {
+          throw e;
+        }
+
+        debug(
+          'WebDriver session create failed (attempt %d/3): %s — resetting UiAutomator2 helpers',
+          attempt + 1,
+          msg.replace(/\s+/g, ' ').slice(0, 220),
+        );
+        this.resetStaleUiAutomator2Servers();
+        await sleep(3_800 + attempt * 1_200);
+      }
+    }
+
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+
+  override async initialize(): Promise<void> {
+    await super.initialize();
+    this.emitProgress(ScraperProgressTypes.Initializing);
+
+    await this.ensureEmulatorRunning();
+    await this.ensureAppiumRunning();
+
+    const appActivity = this.launcherActivityExplicit() ?? (await resolveAndroidLauncherAppActivity(this.appPackage));
+
+    debug('Using appPackage=%s appActivity=%s', this.appPackage, appActivity);
+
+    const capabilities: AppiumCapabilities = {
+      platformName: 'Android',
+      'appium:automationName': 'UiAutomator2',
+      'appium:appPackage': this.appPackage,
+      'appium:appActivity': appActivity,
+      'appium:noReset': true,
+      'appium:newCommandTimeout': 90,
+      'appium:waitAppLaunch': true,
+      'appium:enforceXPath1': true,
+    };
+
+    this.cachedCapabilities = capabilities;
+    if (process.env.ANDROID_SKIP_UIAUTOMATOR2_PRE_RESET !== '1') {
+      debug('Pre-reset UiAutomator2 helper APKs (ANDROID_SKIP_UIAUTOMATOR2_PRE_RESET=1 to skip)');
+      this.resetStaleUiAutomator2Servers();
+      await sleep(2_000);
+    }
+    this.driver = await this.createDriverSession(capabilities);
+
+    await this.ensureTargetAppForeground(appActivity);
+    this.stepLog('android.session.ready', {
+      appPackage: this.appPackage,
+      appActivity,
+    });
+  }
+
+  private buildAmStartComponent(appActivityCap: string): string {
+    if (appActivityCap.includes('/')) {
+      return appActivityCap;
+    }
+    const clsPart = appActivityCap.startsWith('.') ? appActivityCap : `.${appActivityCap}`;
+    return `${this.appPackage}/${clsPart}`;
+  }
+
+  protected stepLog(event: string, detail?: Record<string, unknown>): void {
+    const suffix = detail ? ` ${JSON.stringify(detail)}` : '';
+    const line = `${event}${suffix}`;
+    stepsDebug(line);
+    if (this.options.verbose) {
+      process.stderr.write(`[israeli-bank-scrapers/steps][${this.options.companyId}] ${line}\n`);
+    }
+  }
+
+  protected async readForegroundPackage(): Promise<string> {
+    const driverLike = this.driver as unknown as { getCurrentPackage?: () => Promise<string> };
+    if (typeof driverLike.getCurrentPackage === 'function') {
+      try {
+        const pkg = await driverLike.getCurrentPackage.call(this.driver);
+        if (pkg?.length) return pkg;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const adbPre = (() => {
+      const b = adbBaseArgs();
+      return b.length ? `adb -s ${b[1]}` : 'adb';
+    })();
+
+    try {
+      const focusLine = execSync(`${adbPre} shell dumpsys window displays | grep -m1 mFocusedApp=`, {
+        encoding: 'utf8',
+        timeout: 12_000,
+        shell: '/bin/sh',
+      }).trim();
+      let m = focusLine.match(/}\s+(\S+)\//);
+      if (!m?.[1]) {
+        m = focusLine.match(/\su\d+\s+(\S+)\//);
+      }
+      if (m?.[1]) return m[1];
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      const focusLine = execSync(`${adbPre} shell dumpsys window | grep -m1 mCurrentFocus`, {
+        encoding: 'utf8',
+        timeout: 12_000,
+        shell: '/bin/sh',
+      }).trim();
+      const m = focusLine.match(/\s(\S+)\/\S+/);
+      return m?.[1] ?? '';
+    } catch {
+      return '';
+    }
+  }
+
+  protected async ensureTargetAppForeground(appActivityCap: string): Promise<void> {
+    await sleep(600);
+
+    let fg = await this.readForegroundPackage();
+    if (fg === this.appPackage) {
+      debug('Foreground ok: %s', fg);
+      return;
+    }
+
+    debug('Foreground is %s (want %s); activating...', fg || '(unknown)', this.appPackage);
+
+    try {
+      await this.driver.execute('mobile: activateApp', { appId: this.appPackage });
+    } catch (e) {
+      debug('mobile: activateApp failed: %s', e instanceof Error ? e.message : String(e));
+    }
+
+    await sleep(2_000);
+    fg = await this.readForegroundPackage();
+    if (fg === this.appPackage) {
+      return;
+    }
+
+    const component = this.buildAmStartComponent(appActivityCap);
+    debug('Trying adb am start -n %s', component);
+    spawnSync(
+      'adb',
+      [...adbBaseArgs(), 'shell', 'am', 'start', '-W', '-c', 'android.intent.category.LAUNCHER', '-n', component],
+      {
+        encoding: 'utf8',
+        timeout: 60_000,
+      },
+    );
+
+    await sleep(2_500);
+    fg = await this.readForegroundPackage();
+    if (fg === this.appPackage) {
+      return;
+    }
+
+    debug('Trying adb monkey (known-good manual launch)');
+    spawnSync(
+      'adb',
+      [...adbBaseArgs(), 'shell', 'monkey', '-p', this.appPackage, '-c', 'android.intent.category.LAUNCHER', '1'],
+      {
+        encoding: 'utf8',
+        timeout: 25_000,
+      },
+    );
+
+    await sleep(3_000);
+    fg = await this.readForegroundPackage();
+    if (fg !== this.appPackage) {
+      throw new Error(
+        `Could not bring ${this.appPackage} to foreground (still ${fg || 'unknown'}).\n` +
+          `Last tried component ${component}; verify adb shell monkey -p ${this.appPackage} works.`,
+      );
+    }
+    debug('Foreground ok after monkey: %s', fg);
+  }
+
+  protected async bringTargetAppToForeground(): Promise<void> {
+    const caps = this.cachedCapabilities;
+    if (!caps) {
+      throw new Error('Cannot bring target app to foreground (session capabilities missing).');
+    }
+    await this.ensureTargetAppForeground(caps['appium:appActivity']);
+  }
+
+  protected override async terminate(success: boolean): Promise<void> {
+    if (this.driver) {
+      await this.driver.deleteSession().catch(() => undefined);
+    }
+    if (this.ownedAppium && this.appiumProcess && !this.appiumProcess.killed) {
+      debug('Stopping Appium server (started by scraper)');
+      this.appiumProcess.kill();
+    }
+    if (this.shouldShutdownOwnedEmulator()) {
+      this.shutdownOwnedEmulator();
+    }
+    await super.terminate(success);
+  }
+
+  private isEmulatorRunning(): boolean {
+    try {
+      const output = execSync('adb devices', { encoding: 'utf8', timeout: 5_000 });
+      return output.split('\n').some(line => /^emulator-\d+\s+device$/.test(line.trim()));
+    } catch {
+      return false;
+    }
+  }
+
+  private detectFirstAvd(): string | undefined {
+    try {
+      const output = execSync('emulator -list-avds', { encoding: 'utf8', timeout: 5_000 });
+      const avds = output.trim().split('\n').filter(Boolean);
+      return avds[0];
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async waitForEmulatorBoot(): Promise<void> {
+    const deadline = Date.now() + EMULATOR_BOOT_TIMEOUT_MS;
+
+    debug('Waiting for emulator to appear in adb devices…');
+    while (Date.now() < deadline) {
+      if (this.isEmulatorRunning()) break;
+      await sleep(3_000);
+    }
+
+    debug('Waiting for Android boot to complete…');
+    while (Date.now() < deadline) {
+      try {
+        const r = spawnSync('adb', [...adbBaseArgs(), 'shell', 'getprop', 'sys.boot_completed'], {
+          encoding: 'utf8',
+          timeout: 5_000,
+        });
+        const prop = (r.stdout ?? '').trim();
+        if (prop === '1') {
+          debug('Emulator boot completed');
+          return;
+        }
+      } catch {
+        // emulator not yet accepting adb commands
+      }
+      await sleep(3_000);
+    }
+
+    throw new Error(`Android emulator did not finish booting within ${EMULATOR_BOOT_TIMEOUT_MS / 1_000}s`);
+  }
+
+  private async ensureEmulatorRunning(): Promise<void> {
+    if (this.isEmulatorRunning()) {
+      debug('Emulator already running');
+      return;
+    }
+
+    const avdName = this.androidOptions.avdName ?? this.detectFirstAvd();
+
+    if (!avdName) {
+      throw new Error(
+        'No Android emulator is running and no AVD was found.\n' +
+          'Either start an emulator manually, or set options.avdName to an existing AVD.\n' +
+          'List available AVDs with: emulator -list-avds',
+      );
+    }
+
+    debug('Starting emulator: %s', avdName);
+
+    const emulatorArgs = ['-avd', avdName];
+    if (process.env.DEBUG_ANDROID_EMULATOR_GUI !== '1') {
+      emulatorArgs.push('-no-window');
+    }
+    emulatorArgs.push('-no-snapshot-load');
+
+    const proc = spawn('emulator', emulatorArgs, {
+      detached: true,
+      stdio: 'ignore',
+    });
+    proc.unref();
+
+    await this.waitForEmulatorBoot();
+    this.ownedEmulator = true;
+    this.startedEmulatorSerial = listAttachedEmulatorSerials()[0];
+  }
+
+  private async isAppiumAlive(): Promise<boolean> {
+    try {
+      const res = await fetch(`http://${APPIUM_HOST}:${this.resolvedAppiumPort}/status`);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  private async waitForAppium(): Promise<void> {
+    const deadline = Date.now() + APPIUM_READY_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (await this.isAppiumAlive()) {
+        debug('Appium server is ready');
+        return;
+      }
+      await sleep(1_000);
+    }
+    throw new Error(
+      `Appium server did not become ready within ${APPIUM_READY_TIMEOUT_MS / 1_000}s.\n` +
+        'Make sure appium is installed: bun add -g appium && appium driver install uiautomator2',
+    );
+  }
+
+  private async ensureAppiumRunning(): Promise<void> {
+    if (await this.isAppiumAlive()) {
+      debug('Appium already running on port %d', this.resolvedAppiumPort);
+      return;
+    }
+
+    debug('Starting Appium server on port %d', this.resolvedAppiumPort);
+
+    this.appiumProcess = spawn('appium', ['server', '--port', String(this.resolvedAppiumPort)], {
+      stdio: 'ignore',
+    });
+    this.ownedAppium = true;
+
+    await this.waitForAppium();
+  }
+
+  private async waitForElementInner(selector: string, timeout = DEFAULT_WAIT_MS) {
+    const el = this.driver.$(selector);
+    await el.waitForDisplayed({ timeout });
+    return el;
+  }
+
+  protected async waitForElement(selector: string, timeout = DEFAULT_WAIT_MS) {
+    return this.withUiAutomatorRetry(async () => this.waitForElementInner(selector, timeout));
+  }
+
+  private async waitForAnyDisplayedInner(selectors: readonly string[], timeout = DEFAULT_WAIT_MS) {
+    const deadline = Date.now() + timeout;
+    let lastMessage = '';
+    let iteration = 0;
+    this.stepLog('waitForAnyDisplayed.start', {
+      selectorCount: selectors.length,
+      timeoutMs: timeout,
+    });
+    while (Date.now() < deadline) {
+      iteration++;
+      const slice = Math.min(460, Math.max(200, deadline - Date.now()));
+      let selectorIndex = 0;
+      for (const selector of selectors) {
+        try {
+          const el = this.driver.$(selector);
+          await el.waitForDisplayed({ timeout: slice });
+          const preview = selector.length > 140 ? `${selector.slice(0, 137)}...` : selector;
+          this.stepLog('waitForAnyDisplayed.ok', {
+            selectorIndex,
+            iterations: iteration,
+            selector: preview,
+          });
+          return el;
+        } catch (e) {
+          lastMessage = e instanceof Error ? e.message : String(e);
+        }
+        selectorIndex++;
+      }
+      const remainingMs = Math.max(0, deadline - Date.now());
+      if (iteration === 1 || iteration % 5 === 0) {
+        this.stepLog('waitForAnyDisplayed.retry', {
+          iteration,
+          remainingMs,
+          lastMessage: lastMessage.slice(0, 200),
+        });
+      }
+      await sleep(400);
+    }
+    this.stepLog('waitForAnyDisplayed.fail', {
+      selectorCount: selectors.length,
+      timeoutMs: timeout,
+      lastMessage: lastMessage.slice(0, 220),
+    });
+    throw new Error(`None of ${selectors.length} selectors matched within ${timeout}ms (${lastMessage.slice(0, 160)})`);
+  }
+
+  protected async waitForAnyDisplayed(selectors: readonly string[], timeout = DEFAULT_WAIT_MS) {
+    return this.withUiAutomatorRetry(async () => this.waitForAnyDisplayedInner(selectors, timeout));
+  }
+
+  protected async tapAny(selectors: readonly string[], timeout = DEFAULT_WAIT_MS): Promise<void> {
+    return this.withUiAutomatorRetry(async () => {
+      this.stepLog('tapAny.start', { selectorCount: selectors.length, timeoutMs: timeout });
+      const el = await this.waitForAnyDisplayedInner(selectors, timeout);
+      await el.click();
+      this.stepLog('tapAny.done', { selectorCount: selectors.length });
+    });
+  }
+
+  protected async typeIntoAny(selectors: readonly string[], value: string, timeout = DEFAULT_WAIT_MS): Promise<void> {
+    return this.withUiAutomatorRetry(async () => {
+      this.stepLog('typeIntoAny.start', {
+        selectorCount: selectors.length,
+        timeoutMs: timeout,
+        valueLength: value.length,
+      });
+      const el = await this.waitForAnyDisplayedInner(selectors, timeout);
+      await el.click();
+      await el.clearValue().catch(() => undefined);
+      await el.setValue(value);
+      this.stepLog('typeIntoAny.done', { selectorCount: selectors.length, valueLength: value.length });
+    });
+  }
+
+  protected async pressAndroidBack(): Promise<void> {
+    await this.withUiAutomatorRetry(async () => {
+      const driverLike = this.driver as unknown as {
+        pressKeyCode?: (code: number, metaState?: number) => Promise<void>;
+      };
+      if (typeof driverLike.pressKeyCode === 'function') {
+        await driverLike.pressKeyCode(4);
+        return;
+      }
+      await this.driver.execute('mobile: pressKey', { keycode: 4 });
+    });
+    await sleep(350);
+  }
+
+  protected async readAndroidClipboardPlaintext(): Promise<string> {
+    const clipboard = await this.driver.getClipboard();
+    if (!clipboard || clipboard.length === 0) {
+      return '';
+    }
+
+    const decoded = Buffer.from(clipboard, 'base64').toString('utf8');
+    return decoded;
+  }
+
+  private async isAnyVisibleInner(selectors: readonly string[], timeout = 4_000): Promise<boolean> {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const slice = Math.min(480, Math.max(160, deadline - Date.now()));
+      for (const selector of selectors) {
+        try {
+          const el = this.driver.$(selector);
+          await el.waitForDisplayed({ timeout: slice });
+          return true;
+        } catch {
+          continue;
+        }
+      }
+      await sleep(350);
+    }
+    return false;
+  }
+
+  protected async isAnyVisible(selectors: readonly string[], timeout = 4_000): Promise<boolean> {
+    return this.withUiAutomatorRetry(async () => this.isAnyVisibleInner(selectors, timeout));
+  }
+
+  protected async isVisible(selector: string, timeout = 3_000): Promise<boolean> {
+    try {
+      return await this.withUiAutomatorRetry(async () => {
+        const el = this.driver.$(selector);
+        await el.waitForDisplayed({ timeout });
+        return true;
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  protected async tap(selector: string): Promise<void> {
+    return this.withUiAutomatorRetry(async () => {
+      const el = await this.waitForElementInner(selector);
+      await el.click();
+    });
+  }
+
+  protected async tapByText(text: string): Promise<void> {
+    await this.tap(`//*[@text="${text}"]`);
+  }
+
+  protected async tapByContentDesc(desc: string): Promise<void> {
+    await this.tap(`//*[@content-desc="${desc}"]`);
+  }
+
+  protected async typeInto(selector: string, value: string): Promise<void> {
+    return this.withUiAutomatorRetry(async () => {
+      const el = await this.waitForElementInner(selector);
+      await el.click();
+      await el.clearValue();
+      await el.setValue(value);
+    });
+  }
+
+  protected async readText(selector: string): Promise<string> {
+    return this.withUiAutomatorRetry(async () => {
+      const el = await this.waitForElementInner(selector);
+      return el.getText();
+    });
+  }
+
+  protected async readAllTexts(selector: string): Promise<string[]> {
+    return this.withUiAutomatorRetry(async () => {
+      const elements = this.driver.$$(selector);
+      const texts: string[] = [];
+      for (const el of elements) {
+        texts.push(await el.getText());
+      }
+      return texts;
+    });
+  }
+
+  protected async dismissKeyboard(): Promise<void> {
+    await this.withUiAutomatorRetry(async () => {
+      await this.driver.hideKeyboard().catch(() => undefined);
+    });
+  }
+
+  protected async swipeUp(): Promise<void> {
+    await this.withUiAutomatorRetry(async () => {
+      const { width, height } = await this.driver.getWindowSize();
+      const left = Math.max(1, Math.round(width * 0.12));
+      const top = Math.max(1, Math.round(height * 0.18));
+      const swipeWidth = Math.max(1, width - left * 2);
+      const swipeHeight = Math.max(1, Math.round(height * 0.62));
+      const midX = Math.round(width / 2);
+      const fromY = Math.round(height * 0.72);
+      const toY = Math.round(height * 0.28);
+
+      try {
+        await this.driver.execute('mobile: swipeGesture', {
+          left,
+          top,
+          width: swipeWidth,
+          height: swipeHeight,
+          direction: 'up',
+          percent: 0.72,
+        });
+      } catch (gestureErr) {
+        debug(
+          'mobile: swipeGesture failed (%s); using performActions',
+          gestureErr instanceof Error ? gestureErr.message.slice(0, 140) : String(gestureErr),
+        );
+        await this.driver.performActions([
+          {
+            type: 'pointer',
+            id: 'finger_swipe_up',
+            parameters: { pointerType: 'touch' },
+            actions: [
+              { type: 'pointerMove', duration: 0, x: midX, y: fromY },
+              { type: 'pointerDown', button: 0 },
+              { type: 'pause', duration: SCROLL_DURATION_MS },
+              { type: 'pointerMove', duration: SCROLL_DURATION_MS, x: midX, y: toY },
+              { type: 'pointerUp', button: 0 },
+            ],
+          },
+        ]);
+        await this.driver.releaseActions().catch(() => undefined);
+      }
+
+      await sleep(280);
+    });
+  }
+
+  protected async getChildTexts(parentSelector: string): Promise<string[]> {
+    return this.withUiAutomatorRetry(async () => {
+      const parent = await this.waitForElementInner(parentSelector);
+      const children = parent.$$('android.widget.TextView');
+      const texts: string[] = [];
+      for (const child of children) {
+        const text = await child.getText();
+        if (text) {
+          texts.push(text);
+        }
+      }
+      return texts;
+    });
+  }
+}
