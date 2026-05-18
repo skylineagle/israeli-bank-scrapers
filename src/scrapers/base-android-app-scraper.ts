@@ -5,6 +5,7 @@ import { getDebug } from '../helpers/debug';
 import { resolveAndroidLauncherAppActivity } from '../helpers/android-launcher';
 import { BaseScraper } from './base-scraper';
 import { type ScraperCredentials, type ScraperOptions } from './interface';
+import { sleep } from '../helpers/waiting';
 
 const debug = getDebug('android-app-scraper');
 const stepsDebug = getDebug('steps');
@@ -15,8 +16,6 @@ const DEFAULT_WAIT_MS = 15_000;
 const SCROLL_DURATION_MS = 600;
 const EMULATOR_BOOT_TIMEOUT_MS = 180_000;
 const APPIUM_READY_TIMEOUT_MS = 30_000;
-
-const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 function listAdbDeviceSerials(): string[] {
   try {
@@ -59,6 +58,8 @@ function listAttachedEmulatorSerials(): string[] {
 type AndroidScraperOptions = ScraperOptions & {
   avdName?: string;
   appiumPort?: number;
+  /** AVD snapshot name to load on startup. Defaults to 'scraper-baseline' if it exists. Set ANDROID_COLD_BOOT=1 to skip snapshots entirely. */
+  snapshotName?: string;
 };
 
 type AppiumCapabilities = {
@@ -70,6 +71,7 @@ type AppiumCapabilities = {
   'appium:newCommandTimeout': number;
   'appium:waitAppLaunch': boolean;
   'appium:enforceXPath1': boolean;
+  'appium:uiautomator2ServerInstallTimeout': number;
 };
 
 export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredentials> extends BaseScraper<TCredentials> {
@@ -99,18 +101,17 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   }
 
   private resetStaleUiAutomator2Servers(): void {
-    debug('Uninstalling Appium UiAutomator2 helper APKs (clears broken UiAutomation state)');
     const adb = adbBaseArgs();
     const pkgs = ['io.appium.uiautomator2.server', 'io.appium.uiautomator2.server.test'];
     for (const pkg of pkgs) {
-      spawnSync('adb', [...adb, 'shell', 'am', 'force-stop', pkg], {
-        encoding: 'utf8',
-        timeout: 20_000,
-      });
-      const r = spawnSync('adb', [...adb, 'shell', 'pm', 'uninstall', pkg], {
-        encoding: 'utf8',
-        timeout: 45_000,
-      });
+      const check = spawnSync('adb', [...adb, 'shell', 'pm', 'path', pkg], { encoding: 'utf8', timeout: 10_000 });
+      if (!(check.stdout ?? '').trim().startsWith('package:')) {
+        debug('UiAutomator2 helper %s not installed, skipping uninstall', pkg);
+        continue;
+      }
+      debug('Uninstalling stale UiAutomator2 helper APK: %s', pkg);
+      spawnSync('adb', [...adb, 'shell', 'am', 'force-stop', pkg], { encoding: 'utf8', timeout: 20_000 });
+      const r = spawnSync('adb', [...adb, 'shell', 'pm', 'uninstall', pkg], { encoding: 'utf8', timeout: 45_000 });
       debug('pm uninstall %s exit=%s', pkg, String(r.status));
     }
   }
@@ -177,10 +178,11 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         return await operation();
-      } catch (lastErr) {
-        const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+      } catch (e) {
+        lastErr = e;
+        const msg = e instanceof Error ? e.message : String(e);
         if (!this.isRecoverableWebDriverInfrastructureFailure(msg) || attempt >= 2) {
-          throw lastErr;
+          throw e;
         }
 
         debug('UiAutomator2 recovery pass %d/3 after: %s', attempt + 1, msg.replace(/\s+/g, ' ').slice(0, 170));
@@ -244,6 +246,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
       'appium:newCommandTimeout': 90,
       'appium:waitAppLaunch': true,
       'appium:enforceXPath1': true,
+      'appium:uiautomator2ServerInstallTimeout': 120_000,
     };
 
     this.cachedCapabilities = capabilities;
@@ -278,6 +281,19 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     }
   }
 
+  /**
+   * Run an `adb shell` command against the connected device, returning stdout+stderr.
+   * Uses adbBaseArgs() so it targets the correct device when multiple are attached.
+   */
+  protected spawnAdb(shellArgs: readonly string[]): string {
+    const r = spawnSync('adb', [...adbBaseArgs(), 'shell', ...shellArgs], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+    });
+    return ((r.stdout ?? '') + (r.stderr ?? '')).trim();
+  }
+
   protected async readForegroundPackage(): Promise<string> {
     const driverLike = this.driver as unknown as { getCurrentPackage?: () => Promise<string> };
     if (typeof driverLike.getCurrentPackage === 'function') {
@@ -289,17 +305,15 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
       }
     }
 
-    const adbPre = (() => {
-      const b = adbBaseArgs();
-      return b.length ? `adb -s ${b[1]}` : 'adb';
-    })();
+    const adbArgs = adbBaseArgs();
 
     try {
-      const focusLine = execSync(`${adbPre} shell dumpsys window displays | grep -m1 mFocusedApp=`, {
+      const r = spawnSync('adb', [...adbArgs, 'shell', 'dumpsys', 'window', 'displays'], {
         encoding: 'utf8',
         timeout: 12_000,
-        shell: '/bin/sh',
-      }).trim();
+        maxBuffer: 4 * 1024 * 1024,
+      });
+      const focusLine = (r.stdout ?? '').split('\n').find(l => l.includes('mFocusedApp=')) ?? '';
       let m = focusLine.match(/}\s+(\S+)\//);
       if (!m?.[1]) {
         m = focusLine.match(/\su\d+\s+(\S+)\//);
@@ -310,11 +324,12 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     }
 
     try {
-      const focusLine = execSync(`${adbPre} shell dumpsys window | grep -m1 mCurrentFocus`, {
+      const r = spawnSync('adb', [...adbArgs, 'shell', 'dumpsys', 'window'], {
         encoding: 'utf8',
         timeout: 12_000,
-        shell: '/bin/sh',
-      }).trim();
+        maxBuffer: 4 * 1024 * 1024,
+      });
+      const focusLine = (r.stdout ?? '').split('\n').find(l => l.includes('mCurrentFocus')) ?? '';
       const m = focusLine.match(/\s(\S+)\/\S+/);
       return m?.[1] ?? '';
     } catch {
@@ -476,7 +491,12 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     if (process.env.DEBUG_ANDROID_EMULATOR_GUI !== '1') {
       emulatorArgs.push('-no-window');
     }
-    emulatorArgs.push('-no-snapshot-load');
+    if (process.env.ANDROID_COLD_BOOT === '1') {
+      emulatorArgs.push('-no-snapshot-load');
+    } else {
+      const snapshot = this.androidOptions.snapshotName ?? process.env.ANDROID_SNAPSHOT_NAME ?? 'scraper-baseline';
+      emulatorArgs.push('-snapshot', snapshot);
+    }
 
     const proc = spawn('emulator', emulatorArgs, {
       detached: true,
@@ -717,6 +737,11 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     await this.withUiAutomatorRetry(async () => {
       await this.driver.hideKeyboard().catch(() => undefined);
     });
+  }
+
+  protected isAndroidKeyboardShown(): boolean {
+    const out = this.spawnAdb(['dumpsys', 'input_method']);
+    return out.includes('mInputShown=true');
   }
 
   protected async swipeUp(): Promise<void> {

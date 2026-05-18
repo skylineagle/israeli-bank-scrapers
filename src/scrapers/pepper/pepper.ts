@@ -1,5 +1,5 @@
 import { getDebug } from '../../helpers/debug';
-import { TimeoutError } from '../../helpers/waiting';
+import { sleep, TimeoutError } from '../../helpers/waiting';
 import { type CurrencyAmount, type TransactionsAccount } from '../../transactions';
 import { BaseAndroidAppScraper } from '../base-android-app-scraper';
 import { ScraperErrorTypes } from '../errors';
@@ -23,190 +23,219 @@ const SEL = {
   transactionsTab: `//android.widget.TextView[@resource-id="${PACKAGE_NAME}:id/tvTransactions"]`,
 } as const;
 
-function pepperLoggedInSelectors(): readonly string[] {
-  return [
-    ...pepperHomeDashboardReadySelectors(),
-    ...pepperBottomNavHomeSelectors(),
-    ua('textContains("זאת היתרה")'),
-    ua('textContains("יתרה שלך")'),
-    '//android.widget.TextView[contains(@text,"יתרה שלך")]',
-    '//*[contains(@text,"תנועות אחרונות")]',
-    ua('textContains("תנועות אחרונות")'),
-    '//*[contains(@text,"העברת כסף")]',
-    ua('textContains("העברת כסף")'),
-    ua(`resourceIdMatches("${PACKAGE_NAME}:id/.*[Bb]alance.*").className("android.widget.TextView")`),
-    `//*[contains(@resource-id,'${PACKAGE_NAME}:id/')][contains(@resource-id,'Balance')]`,
-    '//*[@text="פעולות"]',
-    ua('textContains("פעולות").clickable(true)'),
-    SEL.transactionsTab,
-    ua(`resourceId("${PACKAGE_NAME}:id/tvTransactions")`),
-    ua('descriptionContains("יתרה")'),
-  ];
-}
+const PEPPER_BOTTOM_NAV_HOME_SELECTORS: readonly string[] = [
+  '//android.view.View[@content-desc="בית"][@clickable="true"]',
+  '//*[@content-desc="בית"][@clickable="true"]',
+];
 
-function pepperBottomNavHomeSelectors(): readonly string[] {
-  return ['//android.view.View[@content-desc="בית"][@clickable="true"]', '//*[@content-desc="בית"][@clickable="true"]'];
-}
+const PEPPER_HOME_TAB_SELECTORS: readonly string[] = [
+  ...PEPPER_BOTTOM_NAV_HOME_SELECTORS,
+  '//android.widget.TextView[@text="בית"]',
+  '//*[@text="בית" and (@clickable="true" or @focusable="true")]',
+  ua('textContains("בית").clickable(true)'),
+  ua('descriptionContains("בית")'),
+];
 
-function pepperHomeTabSelectors(): readonly string[] {
-  return [
-    ...pepperBottomNavHomeSelectors(),
-    '//android.widget.TextView[@text="בית"]',
-    '//*[@text="בית" and (@clickable="true" or @focusable="true")]',
-    ua('textContains("בית").clickable(true)'),
-    ua('descriptionContains("בית")'),
-  ];
-}
+const PEPPER_HOME_DASHBOARD_READY_SELECTORS: readonly string[] = [
+  '//android.widget.Button[contains(@text,"זאת היתרה")]',
+  '//*[@clickable="true"][contains(@text,"זאת היתרה")]',
+  ua('textContains("זאת היתרה").clickable(true)'),
+  '//*[contains(@text,"חסכונות")]',
+  '//*[contains(@content-desc,"חסכונות")]',
+  ua('textContains("חסכונות")'),
+  ua('descriptionContains("חסכונות")'),
+];
 
-function pepperHomeDashboardReadySelectors(): readonly string[] {
-  return [
-    '//android.widget.Button[contains(@text,"זאת היתרה")]',
-    '//*[@clickable="true"][contains(@text,"זאת היתרה")]',
-    ua('textContains("זאת היתרה").clickable(true)'),
-    '//*[contains(@text,"חסכונות")]',
-    '//*[contains(@content-desc,"חסכונות")]',
-    ua('textContains("חסכונות")'),
-    ua('descriptionContains("חסכונות")'),
-  ];
-}
+const PEPPER_LOGGED_IN_SELECTORS: readonly string[] = [
+  ...PEPPER_HOME_DASHBOARD_READY_SELECTORS,
+  ...PEPPER_BOTTOM_NAV_HOME_SELECTORS,
+  ua('textContains("זאת היתרה")'),
+  ua('textContains("יתרה שלך")'),
+  '//android.widget.TextView[contains(@text,"יתרה שלך")]',
+  '//*[contains(@text,"תנועות אחרונות")]',
+  ua('textContains("תנועות אחרונות")'),
+  '//*[contains(@text,"העברת כסף")]',
+  ua('textContains("העברת כסף")'),
+  ua(`resourceIdMatches("${PACKAGE_NAME}:id/.*[Bb]alance.*").className("android.widget.TextView")`),
+  `//*[contains(@resource-id,'${PACKAGE_NAME}:id/')][contains(@resource-id,'Balance')]`,
+  '//*[@text="פעולות"]',
+  ua('textContains("פעולות").clickable(true)'),
+  SEL.transactionsTab,
+  ua(`resourceId("${PACKAGE_NAME}:id/tvTransactions")`),
+  ua('descriptionContains("יתרה")'),
+];
 
-function pepperBalanceSelectors(): readonly string[] {
-  return [
-    "//*[contains(@resource-id,'Balance')]",
-    ua('resourceIdMatches("(?i).*balance.*").className("android.widget.TextView")'),
-    ua(`resourceIdMatches("${PACKAGE_NAME}:id/.*[Bb]alance.*").className("android.widget.TextView")`),
-    "//*[contains(@text,'₪') or contains(@text,'\u20aa') or contains(@content-desc,'₪') or contains(@content-desc,'\u20aa')]",
-    ua('descriptionContains("יתרה")'),
-    ua('textContains("יתרה")'),
-    '//android.widget.Button[contains(@text,"זאת היתרה")]',
-    '//*[@clickable="true"][contains(@text,"זאת היתרה")]',
-  ];
-}
+const PEPPER_BALANCE_SELECTORS: readonly string[] = [
+  "//*[contains(@resource-id,'Balance')]",
+  ua('resourceIdMatches("(?i).*balance.*").className("android.widget.TextView")'),
+  ua(`resourceIdMatches("${PACKAGE_NAME}:id/.*[Bb]alance.*").className("android.widget.TextView")`),
+  "//*[contains(@text,'₪') or contains(@text,'\u20aa') or contains(@content-desc,'₪') or contains(@content-desc,'\u20aa')]",
+  ua('descriptionContains("יתרה")'),
+  ua('textContains("יתרה")'),
+  '//android.widget.Button[contains(@text,"זאת היתרה")]',
+  '//*[@clickable="true"][contains(@text,"זאת היתרה")]',
+];
 
-function pepperHeroBalanceCompoundSelectors(): readonly string[] {
-  return [
-    '//android.widget.Button[contains(@text,"זאת היתרה")]',
-    '//*[@clickable="true"][contains(@text,"זאת היתרה")]',
-    ua('textContains("זאת היתרה").clickable(true)'),
-  ];
-}
+const PEPPER_HERO_BALANCE_COMPOUND_SELECTORS: readonly string[] = [
+  '//android.widget.Button[contains(@text,"זאת היתרה")]',
+  '//*[@clickable="true"][contains(@text,"זאת היתרה")]',
+  ua('textContains("זאת היתרה").clickable(true)'),
+];
 
-function pepperPhoneSelectorsStrict(): readonly string[] {
-  return [
-    SEL.phoneInput,
-    ua(`resourceId("${PACKAGE_NAME}:id/etPhoneNumber")`),
-    "//android.widget.EditText[contains(@resource-id,'etPhoneNumber')]",
-    "//android.widget.EditText[contains(@resource-id,'phone')]",
-    "//android.widget.EditText[contains(@resource-id,'Phone')]",
-    "//android.widget.EditText[contains(@resource-id,'mobile')]",
-    "//android.widget.EditText[contains(@resource-id,'Mobile')]",
-    "//android.widget.EditText[contains(@resource-id,'tel')]",
-    ua('resourceIdMatches("(?i).*phone.*").className("android.widget.EditText")'),
-  ];
-}
+const PEPPER_PHONE_SELECTORS_STRICT: readonly string[] = [
+  SEL.phoneInput,
+  ua(`resourceId("${PACKAGE_NAME}:id/etPhoneNumber")`),
+  '//android.widget.EditText[@content-desc="מספר טלפון"]',
+  "//android.widget.EditText[contains(@content-desc,'טלפון')]",
+  ua('descriptionContains("מספר טלפון")'),
+  ua('descriptionContains("טלפון")'),
+  "//android.widget.EditText[contains(@resource-id,'etPhoneNumber')]",
+  "//android.widget.EditText[contains(@resource-id,'phone')]",
+  "//android.widget.EditText[contains(@resource-id,'Phone')]",
+  "//android.widget.EditText[contains(@resource-id,'mobile')]",
+  "//android.widget.EditText[contains(@resource-id,'Mobile')]",
+  "//android.widget.EditText[contains(@resource-id,'tel')]",
+  ua('resourceIdMatches("(?i).*phone.*").className("android.widget.EditText")'),
+];
 
-function pepperPhoneSelectors(): readonly string[] {
-  return [...pepperPhoneSelectorsStrict(), ua('descriptionContains("טלפון")'), ua('descriptionContains("נייד")')];
-}
+const PEPPER_PHONE_SELECTORS: readonly string[] = [
+  ...PEPPER_PHONE_SELECTORS_STRICT,
+  ua('descriptionContains("טלפון")'),
+  ua('descriptionContains("נייד")'),
+];
 
-function pepperWelcomeContinueSelectors(): readonly string[] {
-  return [
-    ua('textContains("כניסה")'),
-    ua('textContains("יש לי חשבון")'),
-    ua('textContains("בואו")'),
-    ua('textContains("בואו נתחיל")'),
-    ua('textContains("התחל")'),
-    ua('textContains("להמשיך")'),
-    ua('textMatches("(?i).*start.*")'),
-    ua('resourceIdMatches("(?i).*welcome.*").clickable(true)'),
-    ua('resourceIdMatches("(?i).*btn.*primary.*").clickable(true)'),
-    "//android.widget.Button[contains(@resource-id,'continue')]",
-    "//android.widget.Button[contains(@resource-id,'start')]",
-    ua('className("android.widget.Button").clickable(true).instance(0)'),
-  ];
-}
+const PEPPER_WELCOME_CONTINUE_SELECTORS: readonly string[] = [
+  // Exact texts observed on the welcome screen (login button, not register)
+  ua('text("כניסה לחשבון שלי")'),
+  ua('descriptionContains("כניסה לחשבון שלי")'),
+  '//*[@content-desc="כניסה לחשבון שלי"]',
+  ua('textContains("לחשבון שלי")'),
+  // Older / alternate welcome button texts
+  ua('text("כניסה")'),
+  ua('textContains("יש לי חשבון")'),
+  ua('textContains("בואו נתחיל")'),
+  ua('textContains("להמשיך")'),
+  ua('textMatches("(?i).*start.*")'),
+  ua('resourceIdMatches("(?i).*welcome.*").clickable(true)'),
+  "//android.widget.Button[contains(@resource-id,'continue')]",
+  "//android.widget.Button[contains(@resource-id,'start')]",
+  // NOTE: no instance(0) catch-all — that would tap the register button first
+];
 
-function pepperContinueSelectors(): readonly string[] {
-  return [
-    SEL.continueBtn,
-    ua('classNameContains("FloatingActionButton").clickable(true)'),
-    ua('resourceIdMatches("(?i).*fab.*").clickable(true)'),
-    ua('resourceIdMatches("(?i).*next.*").clickable(true)'),
-    ua('resourceIdMatches("(?i).*submit.*").clickable(true)'),
-    ua('descriptionMatches("(?i).*next.*")'),
-    ua('descriptionMatches("(?i).*arrow.*")'),
-    ua('descriptionContains("הבא")'),
-    ua('descriptionContains("המשך")'),
-    ua('resourceIdMatches("(?i).*continue.*").clickable(true)'),
-    ua('textMatches("(?i).*continue.*")'),
-    '//android.widget.Button[@text="המשך"]',
-    '//*[@text="המשך"]',
-    ua('textContains("המשך")'),
-    ua('textContains("הבא")'),
-  ];
-}
+const PEPPER_CONTINUE_SELECTORS: readonly string[] = [
+  SEL.continueBtn,
+  ua('classNameContains("FloatingActionButton").clickable(true)'),
+  ua('resourceIdMatches("(?i).*fab.*").clickable(true)'),
+  ua('resourceIdMatches("(?i).*next.*").clickable(true)'),
+  ua('resourceIdMatches("(?i).*submit.*").clickable(true)'),
+  ua('descriptionMatches("(?i).*next.*")'),
+  ua('descriptionMatches("(?i).*arrow.*")'),
+  ua('descriptionContains("הבא")'),
+  ua('descriptionContains("המשך")'),
+  ua('resourceIdMatches("(?i).*continue.*").clickable(true)'),
+  ua('textMatches("(?i).*continue.*")'),
+  '//android.widget.Button[@text="המשך"]',
+  '//*[@text="המשך"]',
+  ua('textContains("המשך")'),
+  ua('textContains("הבא")'),
+];
 
-function pepperPostCredentialsSubmitSelectors(): readonly string[] {
-  return [
-    '//*[@text="כניסה לחשבון"]',
-    "//android.widget.Button[contains(@text,'כניסה לחשבון')]",
-    ua('textContains("כניסה לחשבון")'),
-    ua('descriptionContains("כניסה לחשבון")'),
-    SEL.continueBtn,
-    ua('resourceIdMatches("(?i).*login.*").clickable(true)'),
-    ua('resourceIdMatches("(?i).*signin.*").clickable(true)'),
-    ua('resourceIdMatches("(?i).*sign_in.*").clickable(true)'),
-    ua('classNameContains("FloatingActionButton").clickable(true)'),
-    ua('resourceIdMatches("(?i).*fab.*").clickable(true)'),
-    ua('resourceIdMatches("(?i).*submit.*").clickable(true)'),
-    ua('resourceIdMatches("(?i).*continue.*").clickable(true)'),
-    '//*[@text="המשך"]',
-    ua('textContains("המשך")'),
-  ];
-}
+const PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS: readonly string[] = [
+  '//*[@text="כניסה לחשבון"]',
+  "//android.widget.Button[contains(@text,'כניסה לחשבון')]",
+  ua('textContains("כניסה לחשבון")'),
+  ua('descriptionContains("כניסה לחשבון")'),
+  SEL.continueBtn,
+  ua('resourceIdMatches("(?i).*login.*").clickable(true)'),
+  ua('resourceIdMatches("(?i).*signin.*").clickable(true)'),
+  ua('resourceIdMatches("(?i).*sign_in.*").clickable(true)'),
+  ua('classNameContains("FloatingActionButton").clickable(true)'),
+  ua('resourceIdMatches("(?i).*fab.*").clickable(true)'),
+  ua('resourceIdMatches("(?i).*submit.*").clickable(true)'),
+  ua('resourceIdMatches("(?i).*continue.*").clickable(true)'),
+  '//*[@text="המשך"]',
+  ua('textContains("המשך")'),
+];
 
-function pepperPasswordSelectors(): readonly string[] {
-  return [
-    ua(`resourceId("${PACKAGE_NAME}:id/etPassword")`),
-    ua('descriptionContains("סיסמה")'),
-    "//android.widget.EditText[contains(@hint,'סיסמה')]",
-    "//android.widget.EditText[contains(@resource-id,'password')]",
-    "//android.widget.EditText[contains(@resource-id,'Password')]",
-    ua('resourceIdMatches("(?i).*password.*").className("android.widget.EditText")'),
-    '//android.widget.EditText[@password="true"]',
-  ];
-}
+const PEPPER_PASSWORD_SELECTORS: readonly string[] = [
+  ua(`resourceId("${PACKAGE_NAME}:id/etPassword")`),
+  ua('descriptionContains("סיסמה")'),
+  "//android.widget.EditText[contains(@hint,'סיסמה')]",
+  "//android.widget.EditText[contains(@resource-id,'password')]",
+  "//android.widget.EditText[contains(@resource-id,'Password')]",
+  ua('resourceIdMatches("(?i).*password.*").className("android.widget.EditText")'),
+  '//android.widget.EditText[@password="true"]',
+];
 
-function pepperOtpInputSelectors(): readonly string[] {
-  return [
-    SEL.otpInput,
-    "//android.widget.EditText[contains(@resource-id,'otp')]",
-    "//android.widget.EditText[contains(@resource-id,'Otp')]",
-    "//android.widget.EditText[contains(@resource-id,'sms')]",
-    "//android.widget.EditText[contains(@resource-id,'Sms')]",
-    "//android.widget.EditText[contains(@resource-id,'verification')]",
-    "//android.widget.EditText[contains(@resource-id,'code')]",
-    ua('resourceIdMatches("(?i).*otp.*").className("android.widget.EditText")'),
-    ua('resourceIdMatches("(?i).*sms.*").className("android.widget.EditText")'),
-  ];
-}
+// Pepper has shipped at least two OTP screen variants:
+//   (a) Custom RN widget with 6 ViewGroup boxes (resource-id="otp-input") + custom keyboard
+//   (b) Standard single EditText with 6 underline positions + system soft keyboard
+// We detect both. Entry is handled by enterPepperOtpCode().
+const PEPPER_OTP_INPUT_SELECTORS: readonly string[] = [
+  '//*[@resource-id="otp-input"]',
+  '//*[@resource-id="accessible-rect-button"]',
+  '//*[@resource-id="otpScreen.phoneMessage"]',
+  SEL.otpInput,
+  "//android.widget.EditText[contains(@resource-id,'otp')]",
+  "//android.widget.EditText[contains(@resource-id,'Otp')]",
+  ua('resourceIdMatches("(?i).*otp.*").className("android.widget.EditText")'),
+];
 
-function pepperOtpScreenMarkers(): readonly string[] {
-  return [ua('textContains("קוד האימות")'), ua('descriptionContains("קוד האימות")')];
-}
+const PEPPER_OTP_SCREEN_MARKERS: readonly string[] = [
+  '//*[@resource-id="otpScreen.phoneMessage"]',
+  ua('textContains("שלחנו לך קוד")'),
+  ua('textContains("מה הקוד שקיבלת")'),
+  ua('textContains("קוד האימות")'),
+  ua('descriptionContains("קוד האימות")'),
+  ua('textContains("הקוד לא הגיע")'),
+  ua('textContains("הודעה קולית")'),
+  // Fallback: any EditText on screen while we know we are past the password step
+  // (login form is not visible) — Pepper variant (b) uses a plain EditText.
+];
 
-function pepperVerifySelectors(): readonly string[] {
-  return [
-    SEL.verifyOtpBtn,
-    ua('resourceIdMatches("(?i).*verify.*").clickable(true)'),
-    ua('textMatches("(?i).*verify.*")'),
-    '//android.widget.Button[@text="אימות"]',
-    '//*[@text="אימות"]',
-    ua('textContains("אימות")'),
-    ua('descriptionContains("אימות")'),
-    ua('textContains("אשר")'),
-  ];
-}
+const PEPPER_NOTIFICATION_POPUP_SELECTORS: readonly string[] = [
+  '//android.widget.TextView[@text="רוצה להישאר בעניינים?"]',
+  ua('textContains("רוצה להישאר בעניינים?")'),
+  '//android.widget.Button[@content-desc="סגירה"]',
+];
+
+const PEPPER_NOTIFICATION_POPUP_DISMISS_SELECTORS: readonly string[] = [
+  '//*[@text="בפעם אחרת"]',
+  ua('textContains("בפעם אחרת")'),
+  '//android.widget.Button[@content-desc="סגירה"]',
+  ua('descriptionContains("סגירה").clickable(true)'),
+];
+
+const PEPPER_TERMS_SCREEN_SELECTORS: readonly string[] = [
+  '//android.widget.Button[@content-desc="אני מסכימ/ה"]',
+  ua('descriptionContains("אני מסכימ/ה").clickable(true)'),
+  '//android.widget.CheckBox[@resource-id="pressable"]',
+  ua('textContains("תנאי השימוש")'),
+  ua('textContains("רגע לפני שמתחילים")'),
+];
+
+const PEPPER_TERMS_CHECKBOX_SELECTORS: readonly string[] = [
+  '//android.widget.CheckBox[@resource-id="pressable"]',
+  ua('className("android.widget.CheckBox").clickable(true)'),
+];
+
+const PEPPER_TERMS_AGREE_SELECTORS: readonly string[] = [
+  '//android.widget.Button[@content-desc="אני מסכימ/ה"]',
+  ua('descriptionContains("אני מסכימ/ה").clickable(true)'),
+  ua('textContains("אני מסכימ").clickable(true)'),
+  '//android.widget.Button[@resource-id="pressable"]',
+];
+
+const PEPPER_VERIFY_SELECTORS: readonly string[] = [
+  SEL.verifyOtpBtn,
+  ua('resourceIdMatches("(?i).*verify.*").clickable(true)'),
+  ua('textMatches("(?i).*verify.*")'),
+  '//android.widget.Button[@text="אימות"]',
+  '//*[@text="אימות"]',
+  ua('textContains("אימות")'),
+  ua('descriptionContains("אימות")'),
+  ua('textContains("אשר")'),
+];
 
 const AMOUNT_STRIP_REGEX = /[₪,\s]/g;
 
@@ -404,6 +433,18 @@ export function firstIlsAmountFromCompoundText(raw: string): number | undefined 
   return undefined;
 }
 
+function mergeForeignAmounts(gather: CurrencyAmount[], next: CurrencyAmount[]): void {
+  const keys = new Set(gather.map(c => `${c.currency}:${c.amount}`));
+  for (const c of next) {
+    if (c.currency === 'ILS') continue;
+    const k = `${c.currency}:${c.amount}`;
+    if (!keys.has(k)) {
+      keys.add(k);
+      gather.push(c);
+    }
+  }
+}
+
 export type PepperCredentials = {
   phoneNumber: string;
   password: string;
@@ -513,7 +554,8 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
           continue;
         }
       }
-    } catch {
+    } catch (e) {
+      debug('readBalanceFromShekelElementsScan failed: %s', e instanceof Error ? e.message : String(e));
       return undefined;
     }
 
@@ -562,14 +604,14 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   }
 
   private async dismissWelcomeIfPresent(): Promise<void> {
-    const hit = await this.isAnyVisible(pepperWelcomeContinueSelectors(), 8_000);
+    const hit = await this.isAnyVisible(PEPPER_WELCOME_CONTINUE_SELECTORS, 8_000);
     if (!hit) {
       return;
     }
 
     debug('Dismissing welcome / marketing screen');
-    await this.tapAny(pepperWelcomeContinueSelectors(), 22_000);
-    await new Promise<void>(resolve => setTimeout(resolve, 1800));
+    await this.tapAny(PEPPER_WELCOME_CONTINUE_SELECTORS, 22_000);
+    await sleep(1800);
   }
 
   private async enterPhoneDigitsViaKeypad(digits: string): Promise<void> {
@@ -600,7 +642,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
           }
         }
 
-        await new Promise<void>(resolve => setTimeout(resolve, 700));
+        await sleep(700);
         return;
       } catch (e) {
         debug('pressKeyCode path failed: %s', e instanceof Error ? e.message : String(e));
@@ -614,18 +656,18 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
         14_000,
       );
 
-      await new Promise<void>(resolve => setTimeout(resolve, 150));
+      await sleep(150);
     }
   }
 
   private async tapContinueOptional(visibleBudgetMs = 2_800): Promise<void> {
-    const hit = await this.isAnyVisible(pepperContinueSelectors(), visibleBudgetMs);
+    const hit = await this.isAnyVisible(PEPPER_CONTINUE_SELECTORS, visibleBudgetMs);
     if (!hit) {
       return;
     }
     this.stepLog('pepper.login.tap_continue', {});
-    await this.tapAny(pepperContinueSelectors(), 14_000);
-    await new Promise<void>(resolve => setTimeout(resolve, 450));
+    await this.tapAny(PEPPER_CONTINUE_SELECTORS, 14_000);
+    await sleep(450);
     await this.ensurePepperForegroundClosingForeignApps();
   }
 
@@ -643,35 +685,35 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
         return;
       }
       await this.pressAndroidBack();
-      await new Promise<void>(resolve => setTimeout(resolve, 700));
+      await sleep(700);
     }
   }
 
   private async waitForPasswordFieldResolvable(): Promise<void> {
     await this.ensurePepperForegroundClosingForeignApps();
     try {
-      await this.waitForAnyDisplayed(pepperPasswordSelectors(), 35_000);
+      await this.waitForAnyDisplayed(PEPPER_PASSWORD_SELECTORS, 35_000);
       return;
     } catch (firstErr) {
       this.stepLog('pepper.password.wait_failed_once', {
         message: firstErr instanceof Error ? firstErr.message.slice(0, 240) : String(firstErr),
       });
       await this.pressAndroidBack();
-      await new Promise<void>(resolve => setTimeout(resolve, 550));
+      await sleep(550);
       await this.ensurePepperForegroundClosingForeignApps();
-      await this.waitForAnyDisplayed(pepperPasswordSelectors(), 28_000);
+      await this.waitForAnyDisplayed(PEPPER_PASSWORD_SELECTORS, 28_000);
     }
   }
 
   private async isOtpPhaseVisible(): Promise<boolean> {
-    if (await this.isAnyVisible(pepperOtpInputSelectors(), 550)) {
+    if (await this.isAnyVisible(PEPPER_OTP_INPUT_SELECTORS, 550)) {
       return true;
     }
-    return this.isAnyVisible(pepperOtpScreenMarkers(), 550);
+    return this.isAnyVisible(PEPPER_OTP_SCREEN_MARKERS, 550);
   }
 
   private async isLoginChromeVisible(): Promise<boolean> {
-    if (await this.isAnyVisible(pepperPasswordSelectors(), 450)) {
+    if (await this.isAnyVisible(PEPPER_PASSWORD_SELECTORS, 450)) {
       return true;
     }
     return this.isAnyVisible(['//*[@text="כניסה לחשבון"]', ua('textContains("כניסה לחשבון")')], 450);
@@ -680,36 +722,44 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   private async pollLoggedInOrOtpAfterPassword(totalMs: number): Promise<'logged_in' | 'otp'> {
     const deadline = Date.now() + totalMs;
     while (Date.now() < deadline) {
-      if (await this.isAnyVisible(pepperLoggedInSelectors(), 750)) {
-        return 'logged_in';
-      }
+      // Check OTP first: it appears in milliseconds after the server validates credentials.
+      // Checking it before the 23-selector logged-in list saves ~2 s per poll iteration.
       if (await this.isOtpPhaseVisible()) {
         return 'otp';
+      }
+      if (await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 750)) {
+        return 'logged_in';
+      }
+      // Terms page can appear after password submit when OTP is not required.
+      if (await this.isAnyVisible(PEPPER_TERMS_SCREEN_SELECTORS, 450)) {
+        this.stepLog('pepper.login.terms_after_password', {});
+        await this.acceptTermsIfPresent(12_000);
+        continue;
       }
       if (await this.isLoginChromeVisible()) {
         await this.tapPostCredentialsSubmitOptional();
       }
-      await new Promise<void>(resolve => setTimeout(resolve, 420));
+      await sleep(420);
     }
     throw new TimeoutError(`Timed out after ${totalMs}ms waiting for Pepper home screen or SMS/code verification UI`);
   }
 
   private async tapPostCredentialsSubmitOptional(visibleBudgetMs = 2_800): Promise<void> {
-    const hit = await this.isAnyVisible(pepperPostCredentialsSubmitSelectors(), visibleBudgetMs);
+    const hit = await this.isAnyVisible(PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS, visibleBudgetMs);
     if (!hit) {
       return;
     }
-    await this.tapAny(pepperPostCredentialsSubmitSelectors(), 14_000);
-    await new Promise<void>(resolve => setTimeout(resolve, 450));
+    await this.tapAny(PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS, 14_000);
+    await sleep(450);
   }
 
   private async tapVerifyOptional(): Promise<void> {
-    const hit = await this.isAnyVisible(pepperVerifySelectors(), 2_800);
+    const hit = await this.isAnyVisible(PEPPER_VERIFY_SELECTORS, 2_800);
     if (!hit) {
       debug('No OTP verify button found; assuming submit happens automatically');
       return;
     }
-    await this.tapAny(pepperVerifySelectors(), 14_000);
+    await this.tapAny(PEPPER_VERIFY_SELECTORS, 14_000);
   }
 
   private phoneDigitsMatch(existingRaw: string, wantDialDigits: string): boolean {
@@ -730,7 +780,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   }
 
   private async readStrictPhoneFieldValue(): Promise<string> {
-    for (const sel of pepperPhoneSelectorsStrict()) {
+    for (const sel of PEPPER_PHONE_SELECTORS_STRICT) {
       try {
         const el = this.driver.$(sel);
         await el.waitForDisplayed({ timeout: 1_600 });
@@ -747,25 +797,31 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     const fullPhone = normalizePhone(credentials.phoneNumber);
     const dialDigits = digitsForDialerScreen(fullPhone);
 
-    if (await this.isAnyVisible(pepperPasswordSelectors(), 4_500)) {
-      this.stepLog('pepper.login.skip_phone_password_visible', {});
-      return;
+    if (await this.isAnyVisible(PEPPER_PASSWORD_SELECTORS, 4_500)) {
+      // Only skip phone entry if we're on the password-only step (two-step wizard).
+      // On a combined phone+password form both fields are visible — don't skip.
+      const phoneAlsoVisible = await this.isAnyVisible(PEPPER_PHONE_SELECTORS_STRICT, 1_500);
+      if (!phoneAlsoVisible) {
+        this.stepLog('pepper.login.skip_phone_password_visible', {});
+        return;
+      }
+      this.stepLog('pepper.login.combined_form_detected', {});
     }
 
-    const strictVisible = await this.isAnyVisible(pepperPhoneSelectorsStrict(), 11_000);
+    const strictVisible = await this.isAnyVisible(PEPPER_PHONE_SELECTORS_STRICT, 11_000);
     if (strictVisible) {
       const existing = await this.readStrictPhoneFieldValue();
       if (this.phoneDigitsMatch(existing, dialDigits)) {
         this.stepLog('pepper.login.phone_prefilled_skip_type', {});
         return;
       }
-      await this.typeIntoAny(pepperPhoneSelectorsStrict(), dialDigits, LOGIN_UI_WAIT_MS);
+      await this.typeIntoAny(PEPPER_PHONE_SELECTORS_STRICT, dialDigits, LOGIN_UI_WAIT_MS);
       return;
     }
 
-    if (await this.isAnyVisible(pepperPhoneSelectors(), 7_500)) {
+    if (await this.isAnyVisible(PEPPER_PHONE_SELECTORS, 7_500)) {
       try {
-        await this.typeIntoAny(pepperPhoneSelectorsStrict(), dialDigits, LOGIN_UI_WAIT_MS);
+        await this.typeIntoAny(PEPPER_PHONE_SELECTORS_STRICT, dialDigits, LOGIN_UI_WAIT_MS);
       } catch {
         this.stepLog('pepper.login.phone_strict_type_failed_keypad', {});
         await this.enterPhoneDigitsViaKeypad(dialDigits);
@@ -776,15 +832,125 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     await this.enterPhoneDigitsViaKeypad(dialDigits);
   }
 
+  /**
+   * Enters an OTP code into Pepper's custom React Native digit-box widget.
+   *
+   * Pepper's OTP screen uses ViewGroup elements (resource-id="otp-input") backed
+   * by a hidden React Native TextInput. The keyboard is typically already open
+   * and the first digit box is focused when this method is called.
+   *
+   * Strategy:
+   *   1. If the system keyboard is already shown (the normal case), skip the tap
+   *      entirely — tapping would close+reopen the keyboard and 400 ms is not
+   *      enough time for the RN component to stabilise.
+   *   2. If the keyboard is closed (e.g. dismissed by UiAutomator2 accessibility
+   *      queries), tap accessible-rect-button to reopen it and wait 1000 ms.
+   *   3. Send each digit as `adb shell input keyevent KEYCODE_<n>`.
+   */
+  private async enterPepperOtpCode(code: string): Promise<void> {
+    debug('Entering OTP (%d digits)', code.length);
+
+    for (const ch of code) {
+      const n = ch.charCodeAt(0) - '0'.charCodeAt(0);
+      if (n < 0 || n > 9) {
+        throw new Error(`OTP contains non-digit character: ${JSON.stringify(ch)}`);
+      }
+    }
+
+    if (await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 800)) {
+      debug('OTP auto-verified by Pepper (SMS auto-detect); already on home screen');
+      return;
+    }
+
+    if (await this.isAnyVisible(PEPPER_PHONE_SELECTORS_STRICT, 600)) {
+      throw new Error('Returned to login screen while waiting for OTP — re-run the scraper');
+    }
+
+    // After the WebDriverIO queries above, check actual keyboard state.
+    // If it is already open we go straight to typing — no tap needed.
+    const keyboardOpen = this.isAndroidKeyboardShown();
+    debug('OTP keyboard state: %s', keyboardOpen ? 'open' : 'closed');
+
+    if (!keyboardOpen) {
+      // Keyboard was closed (possibly dismissed by UiAutomator2 accessibility
+      // queries). Tap the OTP input area to reopen it.
+      const focusSelectors = [
+        '//*[@resource-id="accessible-rect-button"]',
+        '//*[@resource-id="otp-input"]',
+        "//android.widget.EditText[contains(@resource-id,'otp')]",
+        "//android.widget.EditText[contains(@resource-id,'Otp')]",
+        '//android.widget.EditText',
+      ];
+      let tapped = false;
+      for (const sel of focusSelectors) {
+        try {
+          const el = this.driver.$(sel);
+          if (await el.isExisting()) {
+            const loc = await el.getLocation();
+            const sz = await el.getSize();
+            const tapX = Math.round(loc.x + sz.width / 2);
+            const tapY = Math.round(loc.y + sz.height / 2);
+            debug('OTP focus tap: (%d, %d) via %s', tapX, tapY, sel);
+            this.spawnAdb(['input', 'tap', String(tapX), String(tapY)]);
+            tapped = true;
+            break;
+          }
+        } catch (e) {
+          debug('Focus selector %s failed: %s', sel, (e as Error)?.message);
+        }
+      }
+      // Wait long enough for the keyboard animation and RN component to settle.
+      await sleep(tapped ? 1000 : 400);
+    } else {
+      // Keyboard is open — the first digit box is already focused.
+      // A short pause lets any pending UI animation finish.
+      await sleep(300);
+    }
+
+    for (const ch of code) {
+      const keycode = 7 + (ch.charCodeAt(0) - '0'.charCodeAt(0));
+      this.spawnAdb(['input', 'keyevent', String(keycode)]);
+      await sleep(80);
+    }
+    await sleep(500);
+    debug('OTP digits sent');
+
+    if (await this.isAnyVisible(PEPPER_PHONE_SELECTORS_STRICT, 600)) {
+      throw new Error('After OTP entry we are back on the login screen — OTP entry was routed to the wrong field');
+    }
+  }
+
+  private async dismissNotificationPopupIfPresent(): Promise<void> {
+    if (!(await this.isAnyVisible(PEPPER_NOTIFICATION_POPUP_SELECTORS, 2_500))) {
+      return;
+    }
+    debug('Notification opt-in popup detected; dismissing');
+    await this.tapAny(PEPPER_NOTIFICATION_POPUP_DISMISS_SELECTORS, 8_000);
+    await sleep(600);
+  }
+
+  private async acceptTermsIfPresent(timeoutMs = 8_000): Promise<void> {
+    if (!(await this.isAnyVisible(PEPPER_TERMS_SCREEN_SELECTORS, timeoutMs))) {
+      return;
+    }
+    debug('Terms of use screen detected; accepting');
+    this.stepLog('pepper.login.terms_screen', {});
+
+    // Check the checkbox ("I have read and agree to the terms…")
+    const checkboxVisible = await this.isAnyVisible(PEPPER_TERMS_CHECKBOX_SELECTORS, 4_000);
+    if (checkboxVisible) {
+      await this.tapAny(PEPPER_TERMS_CHECKBOX_SELECTORS, 8_000);
+      await sleep(600);
+    }
+
+    // Tap the agree button
+    await this.tapAny(PEPPER_TERMS_AGREE_SELECTORS, 10_000);
+    await sleep(1_200);
+    debug('Terms accepted');
+  }
+
   async login(credentials: PepperCredentials): Promise<ScraperLoginResult> {
     this.stepLog('pepper.login.start', {});
-    debug('Checking if session is already active');
-
-    const alreadyLoggedIn = await this.isAnyVisible(pepperLoggedInSelectors(), 22_000);
-    if (alreadyLoggedIn) {
-      debug('Existing session found, skipping login');
-      return { success: true };
-    }
 
     if (!credentials.password?.trim()) {
       return {
@@ -794,9 +960,31 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       };
     }
 
-    await new Promise<void>(resolve => setTimeout(resolve, 2_500));
+    // Fast-path: if the login form (phone/password fields) is immediately visible
+    // (e.g. when booting from the scraper-baseline snapshot), skip the logged-in
+    // check and the welcome-screen dismiss — both waste several seconds when we're
+    // already on the login form.
+    const loginFormVisible = await this.isAnyVisible(PEPPER_PHONE_SELECTORS_STRICT, 2_000);
 
-    await this.dismissWelcomeIfPresent();
+    if (!loginFormVisible) {
+      debug('Login form not immediately visible — checking if already logged in');
+      const alreadyLoggedIn = await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 5_000);
+      if (alreadyLoggedIn) {
+        debug('Existing session found, skipping login');
+        return { success: true };
+      }
+      // Terms page can be showing if the app was interrupted after OTP but before acceptance.
+      if (await this.isAnyVisible(PEPPER_TERMS_SCREEN_SELECTORS, 3_000)) {
+        this.stepLog('pepper.login.terms_at_start', {});
+        debug('Terms page showing at session start; accepting and waiting for home');
+        await this.acceptTermsIfPresent(12_000);
+        await this.waitForAnyDisplayed(PEPPER_LOGGED_IN_SELECTORS, 30_000);
+        return { success: true };
+      }
+      await sleep(1_500);
+      await this.dismissWelcomeIfPresent();
+    }
+
     this.stepLog('pepper.login.after_welcome', {});
 
     debug('Entering phone number');
@@ -806,25 +994,31 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     this.stepLog('pepper.login.after_phone', {});
 
     debug('Combined login: checking if password field is already on screen');
-    const passwordAlreadyVisible = await this.isAnyVisible(pepperPasswordSelectors(), 4_500);
+    const passwordAlreadyVisible = await this.isAnyVisible(PEPPER_PASSWORD_SELECTORS, 4_500);
     if (!passwordAlreadyVisible) {
       await this.tapContinueOptional(5_500);
     }
 
     debug('Waiting for password field');
     await this.waitForPasswordFieldResolvable();
-    await this.typeIntoAny(pepperPasswordSelectors(), credentials.password.trim(), LOGIN_UI_WAIT_MS);
+    await this.typeIntoAny(PEPPER_PASSWORD_SELECTORS, credentials.password.trim(), LOGIN_UI_WAIT_MS);
     await this.dismissKeyboard();
-    await new Promise<void>(resolve => setTimeout(resolve, 1_100));
+    await sleep(1_100);
 
-    if (await this.isAnyVisible(pepperLoggedInSelectors(), 12_000)) {
+    // Check OTP first (server often auto-triggers it the moment valid credentials are typed),
+    // then home screen, then sign-in button — in order from most likely to least likely.
+    if (await this.isOtpPhaseVisible()) {
+      debug('OTP screen visible immediately after password entry');
+    } else if (await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 3_000)) {
       debug('Already on Pepper home; skipping כניסה לחשבון tap');
     } else {
       try {
-        await this.tapAny(pepperPostCredentialsSubmitSelectors(), 22_000);
+        await this.tapAny(PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS, 14_000);
       } catch (e) {
-        if (await this.isAnyVisible(pepperLoggedInSelectors(), 10_000)) {
-          debug('Credentials CTA not found in time but home is visible — continuing');
+        if (await this.isOtpPhaseVisible()) {
+          debug('OTP appeared while waiting for sign-in button');
+        } else if (await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 3_000)) {
+          debug('Home visible after sign-in button timeout — continuing');
         } else {
           throw e;
         }
@@ -847,22 +1041,24 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       };
     }
 
-    await this.waitForAnyDisplayed(pepperOtpInputSelectors(), 28_000);
+    await this.waitForAnyDisplayed(PEPPER_OTP_INPUT_SELECTORS, 10_000);
     debug('SMS/code verification required; invoking otpCodeRetriever');
     const otpCode = await credentials.otpCodeRetriever();
 
-    await this.typeIntoAny(pepperOtpInputSelectors(), otpCode, LOGIN_UI_WAIT_MS);
-    await this.dismissKeyboard();
+    await this.enterPepperOtpCode(otpCode);
     await this.tapVerifyOptional();
 
+    // One-time terms-of-use acceptance screen that appears after first OTP verification.
+    await this.acceptTermsIfPresent(8_000);
+
     debug('Waiting for home screen after OTP');
-    await this.waitForAnyDisplayed(pepperLoggedInSelectors(), 45_000);
+    await this.waitForAnyDisplayed(PEPPER_LOGGED_IN_SELECTORS, 45_000);
 
     return { success: true };
   }
 
   private async readBalanceFromHeroCompound(): Promise<number | undefined> {
-    for (const sel of pepperHeroBalanceCompoundSelectors()) {
+    for (const sel of PEPPER_HERO_BALANCE_COMPOUND_SELECTORS) {
       try {
         const el = this.driver.$(sel);
         await el.waitForDisplayed({ timeout: 5_000 });
@@ -899,7 +1095,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       return compound;
     }
 
-    const el = await this.waitForAnyDisplayed(pepperBalanceSelectors(), 18_000);
+    const el = await this.waitForAnyDisplayed(PEPPER_BALANCE_SELECTORS, 18_000);
     const raw = await this.readAccessibleText(el);
     const parsed = parseCurrencyAmountSnippet(raw);
     if (parsed?.currency === 'ILS' && Number.isFinite(parsed.amount)) {
@@ -920,13 +1116,14 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
 
   private async ensurePepperHomeDashboard(): Promise<void> {
     debug('Ensuring Pepper בית dashboard before reads');
+    await this.dismissNotificationPopupIfPresent();
     try {
-      await this.tapAny(pepperHomeTabSelectors(), 22_000);
+      await this.tapAny(PEPPER_HOME_TAB_SELECTORS, 22_000);
     } catch {
       debug('Home tab tap skipped or failed; continuing to wait for dashboard');
     }
-    await new Promise<void>(resolve => setTimeout(resolve, 700));
-    await this.waitForAnyDisplayed(pepperHomeDashboardReadySelectors(), 5_000);
+    await sleep(700);
+    await this.waitForAnyDisplayed(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 5_000);
   }
 
   private async dashboardIlsNearLabelWalk(labelNeedle: string): Promise<number | undefined> {
@@ -972,7 +1169,8 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
           break;
         }
       }
-    } catch {
+    } catch (e) {
+      debug('dashboardIlsNearLabelWalk(%s) failed: %s', labelNeedle, e instanceof Error ? e.message : String(e));
       return undefined;
     }
     return undefined;
@@ -994,7 +1192,13 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
         return undefined;
       }
       return parsed.amount;
-    } catch {
+    } catch (e) {
+      debug(
+        'dashboardIlsAfterLabelNth(%s,%d) failed: %s',
+        labelNeedle,
+        nth,
+        e instanceof Error ? e.message : String(e),
+      );
       return undefined;
     }
   }
@@ -1012,21 +1216,6 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       ua('descriptionContains("מטח")'),
     ];
 
-    const mergeInto = (gather: CurrencyAmount[], next: CurrencyAmount[]) => {
-      const keys = new Set(gather.map(c => `${c.currency}:${c.amount}`));
-      for (const c of next) {
-        if (c.currency === 'ILS') {
-          continue;
-        }
-        const k = `${c.currency}:${c.amount}`;
-        if (keys.has(k)) {
-          continue;
-        }
-        keys.add(k);
-        gather.push(c);
-      }
-    };
-
     const stops = /כרטיסי אשראי|תנועות אחרונות|פעולות|^בית$/;
 
     for (const px of [...pivotXpaths, ...pivotUi]) {
@@ -1041,7 +1230,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
 
         for (let depth = 0; depth < 5; depth++) {
           const blob = await this.readAccessibleText(elWalker);
-          mergeInto(gather, extractForeignCurrencyAmountsFromText(blob));
+          mergeForeignAmounts(gather, extractForeignCurrencyAmountsFromText(blob));
           if (gather.length >= 6) {
             break;
           }
@@ -1068,7 +1257,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
             if (stops.exec(line)) {
               break;
             }
-            mergeInto(gather, extractForeignCurrencyAmountsFromText(raw));
+            mergeForeignAmounts(gather, extractForeignCurrencyAmountsFromText(raw));
             if (gather.length >= 6) {
               break;
             }
@@ -1079,7 +1268,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
           const rowish = await anchor.$$('.//android.widget.TextView | .//android.view.View').getElements();
           for (const node of rowish.slice(0, 20)) {
             const raw = await this.readAccessibleText(node);
-            mergeInto(gather, extractForeignCurrencyAmountsFromText(raw));
+            mergeForeignAmounts(gather, extractForeignCurrencyAmountsFromText(raw));
             if (gather.length >= 6) {
               break;
             }
@@ -1098,20 +1287,6 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   }
 
   private async dashboardForeignBalancesBroadScan(): Promise<CurrencyAmount[] | undefined> {
-    const mergeInto = (gather: CurrencyAmount[], next: CurrencyAmount[]) => {
-      const keys = new Set(gather.map(c => `${c.currency}:${c.amount}`));
-      for (const c of next) {
-        if (c.currency === 'ILS') {
-          continue;
-        }
-        const k = `${c.currency}:${c.amount}`;
-        if (keys.has(k)) {
-          continue;
-        }
-        keys.add(k);
-        gather.push(c);
-      }
-    };
     const fxHint = /[$€£¥]|מט\u05f4ח|מט["׳']ח|\bUSD\b|\bEUR\b|\bGBP\b|\bCHF\b|\bJPY\b|\bCAD\b|\bAUD\b|\bPLN\b/i;
     try {
       const size = await this.driver.getWindowSize().catch(() => ({ height: 2400 }));
@@ -1141,7 +1316,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
           if (!fxHint.test(raw)) {
             continue;
           }
-          mergeInto(gather, extractForeignCurrencyAmountsFromText(raw));
+          mergeForeignAmounts(gather, extractForeignCurrencyAmountsFromText(raw));
           if (gather.length >= 14) {
             break;
           }
@@ -1150,7 +1325,8 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
         }
       }
       return gather.length > 0 ? gather : undefined;
-    } catch {
+    } catch (e) {
+      debug('dashboardForeignBalancesBroadScan failed: %s', e instanceof Error ? e.message : String(e));
       return undefined;
     }
   }

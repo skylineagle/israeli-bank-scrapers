@@ -193,6 +193,13 @@ export type ScraperOptions = ScraperBrowserOptions & {
    * @default true
    */
   shutdownEmulatorOnTerminate?: boolean;
+
+  /**
+   * AVD snapshot name to load when the scraper starts the emulator.
+   * Defaults to 'scraper-baseline' (the recommended clean snapshot with Pepper installed but logged out).
+   * Set ANDROID_COLD_BOOT=1 to skip snapshots and force a full cold boot instead.
+   */
+  snapshotName?: string;
 };
 
 export interface OutputDataOptions {
