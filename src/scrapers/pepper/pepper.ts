@@ -654,7 +654,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 8_000)) {
         // App navigated to home — fall through; snapshot will be saved on home screen
       } else {
-        return;  // Still on login screen after grace period — needs re-authentication
+        return; // Still on login screen after grace period — needs re-authentication
       }
     }
 

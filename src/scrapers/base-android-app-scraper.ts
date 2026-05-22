@@ -526,10 +526,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
       try {
         await this.prepareEmulatorSnapshotState();
       } catch (e) {
-        debug(
-          'prepareEmulatorSnapshotState failed: %s',
-          e instanceof Error ? e.message : String(e),
-        );
+        debug('prepareEmulatorSnapshotState failed: %s', e instanceof Error ? e.message : String(e));
       }
     }
     if (this.driver) {

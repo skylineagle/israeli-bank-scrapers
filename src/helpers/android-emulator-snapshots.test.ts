@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from 'fs';
+import { mkdirSync, rmSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import {
