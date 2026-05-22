@@ -2,6 +2,12 @@ import { execSync, spawn, spawnSync, type ChildProcess } from 'child_process';
 import { type Browser, remote } from 'webdriverio';
 import { ScraperProgressTypes } from '../definitions';
 import { getDebug } from '../helpers/debug';
+import {
+  DEFAULT_ANDROID_BASELINE_SNAPSHOT,
+  DEFAULT_ANDROID_SESSION_SNAPSHOT,
+  emulatorSnapshotExists,
+  resolveEmulatorSnapshotNames,
+} from '../helpers/android-emulator-snapshots';
 import { resolveAndroidLauncherAppActivity } from '../helpers/android-launcher';
 import { BaseScraper } from './base-scraper';
 import { type ScraperCredentials, type ScraperOptions } from './interface';
@@ -58,8 +64,11 @@ function listAttachedEmulatorSerials(): string[] {
 type AndroidScraperOptions = ScraperOptions & {
   avdName?: string;
   appiumPort?: number;
-  /** AVD snapshot name to load on startup. Defaults to 'scraper-baseline' if it exists. Set ANDROID_COLD_BOOT=1 to skip snapshots entirely. */
   snapshotName?: string;
+  baselineSnapshotName?: string;
+  sessionSnapshotName?: string;
+  persistEmulatorSession?: boolean;
+  forceBaselineSnapshot?: boolean;
 };
 
 type AppiumCapabilities = {
@@ -85,6 +94,8 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   private ownedEmulator = false;
 
   private startedEmulatorSerial?: string;
+
+  private startedAvdName?: string;
 
   protected abstract get appPackage(): string;
 
@@ -147,6 +158,106 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
 
   private shouldShutdownOwnedEmulator(): boolean {
     return this.ownedEmulator && this.androidOptions.shutdownEmulatorOnTerminate !== false;
+  }
+
+  private shouldPersistEmulatorSession(scrapeSuccess: boolean): boolean {
+    if (!scrapeSuccess || !this.ownedEmulator || !this.startedAvdName) {
+      return false;
+    }
+    if (this.androidOptions.persistEmulatorSession === false) {
+      return false;
+    }
+    if (process.env.ANDROID_NO_SESSION_SNAPSHOT === '1') {
+      return false;
+    }
+    return true;
+  }
+
+  private resolveSnapshotNamesForAvd(avdName: string) {
+    const explicitSnapshot = this.androidOptions.snapshotName ?? process.env.ANDROID_SNAPSHOT_NAME;
+    const forceBaseline =
+      this.androidOptions.forceBaselineSnapshot === true || process.env.ANDROID_FORCE_BASELINE === '1';
+    return resolveEmulatorSnapshotNames({
+      avdName,
+      explicitSnapshotName: explicitSnapshot,
+      baselineSnapshotName:
+        this.androidOptions.baselineSnapshotName ??
+        process.env.ANDROID_BASELINE_SNAPSHOT_NAME ??
+        DEFAULT_ANDROID_BASELINE_SNAPSHOT,
+      sessionSnapshotName:
+        this.androidOptions.sessionSnapshotName ??
+        process.env.ANDROID_SESSION_SNAPSHOT_NAME ??
+        DEFAULT_ANDROID_SESSION_SNAPSHOT,
+      forceBaselineSnapshot: forceBaseline,
+    });
+  }
+
+  private prepareEmulatorForSnapshotSave(serial: string): void {
+    spawnSync('adb', ['-s', serial, 'shell', 'sync'], { encoding: 'utf8', timeout: 30_000 });
+  }
+
+  private async saveEmulatorSessionSnapshot(): Promise<boolean> {
+    const avdName = this.startedAvdName;
+    if (!avdName) {
+      debug('No AVD name recorded; skipping session snapshot save');
+      return false;
+    }
+
+    const serial = this.startedEmulatorSerial ?? listAttachedEmulatorSerials()[0];
+    if (!serial) {
+      debug('No emulator serial; skipping session snapshot save');
+      return false;
+    }
+
+    const { sessionSnapshot } = this.resolveSnapshotNamesForAvd(avdName);
+    this.prepareEmulatorForSnapshotSave(serial);
+
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      debug(
+        'Saving emulator session snapshot "%s" on %s (attempt %d/%d)',
+        sessionSnapshot,
+        serial,
+        attempt,
+        maxAttempts,
+      );
+      this.stepLog('android.snapshot.save', { snapshot: sessionSnapshot, avdName, attempt });
+
+      const r = spawnSync('adb', ['-s', serial, 'emu', 'avd', 'snapshot', 'save', sessionSnapshot], {
+        encoding: 'utf8',
+        timeout: 120_000,
+      });
+      const out = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim();
+      if (r.status !== 0) {
+        debug('Session snapshot save failed (exit %s): %s', String(r.status), out.slice(0, 400));
+        if (attempt < maxAttempts) {
+          await sleep(2_000);
+        }
+        continue;
+      }
+
+      if (emulatorSnapshotExists(avdName, sessionSnapshot)) {
+        debug('Session snapshot "%s" saved for AVD %s', sessionSnapshot, avdName);
+        this.stepLog('android.snapshot.saved', { snapshot: sessionSnapshot, avdName });
+        if (this.options.verbose) {
+          process.stderr.write(
+            `[israeli-bank-scrapers] Saved logged-in emulator snapshot "${sessionSnapshot}" for AVD "${avdName}". Next run will boot from it and skip OTP.\n`,
+          );
+        }
+        return true;
+      }
+
+      debug('Snapshot save command succeeded but "%s" not found on disk yet', sessionSnapshot);
+    }
+
+    this.stepLog('android.snapshot.save_failed', { snapshot: sessionSnapshot, avdName });
+    if (this.options.verbose) {
+      process.stderr.write(
+        `[israeli-bank-scrapers] WARNING: Could not persist emulator session snapshot "${sessionSnapshot}". ` +
+          `The next run may require OTP again. Check adb -s ${serial} emu avd snapshot save.\n`,
+      );
+    }
+    return false;
   }
 
   private shutdownOwnedEmulator(): void {
@@ -406,13 +517,30 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     await this.ensureTargetAppForeground(caps['appium:appActivity']);
   }
 
+  /** Navigate app UI to a stable screen before persisting an emulator RAM snapshot (override in bank scrapers). */
+  protected async prepareEmulatorSnapshotState(): Promise<void> {}
+
   protected override async terminate(success: boolean): Promise<void> {
+    const persistSession = this.shouldPersistEmulatorSession(success);
+    if (persistSession) {
+      try {
+        await this.prepareEmulatorSnapshotState();
+      } catch (e) {
+        debug(
+          'prepareEmulatorSnapshotState failed: %s',
+          e instanceof Error ? e.message : String(e),
+        );
+      }
+    }
     if (this.driver) {
       await this.driver.deleteSession().catch(() => undefined);
     }
     if (this.ownedAppium && this.appiumProcess && !this.appiumProcess.killed) {
       debug('Stopping Appium server (started by scraper)');
       this.appiumProcess.kill();
+    }
+    if (persistSession) {
+      await this.saveEmulatorSessionSnapshot();
     }
     if (this.shouldShutdownOwnedEmulator()) {
       this.shutdownOwnedEmulator();
@@ -491,11 +619,28 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     if (process.env.DEBUG_ANDROID_EMULATOR_GUI !== '1') {
       emulatorArgs.push('-no-window');
     }
+    this.startedAvdName = avdName;
+
     if (process.env.ANDROID_COLD_BOOT === '1') {
-      emulatorArgs.push('-no-snapshot-load');
+      emulatorArgs.push('-no-snapshot-load', '-no-snapshot-save');
     } else {
-      const snapshot = this.androidOptions.snapshotName ?? process.env.ANDROID_SNAPSHOT_NAME ?? 'scraper-baseline';
-      emulatorArgs.push('-snapshot', snapshot);
+      const { loadSnapshot, sessionSnapshot, baselineSnapshot } = this.resolveSnapshotNamesForAvd(avdName);
+      const sessionReady = emulatorSnapshotExists(avdName, sessionSnapshot);
+      debug(
+        'Booting AVD %s from snapshot "%s" (session "%s" %s)',
+        avdName,
+        loadSnapshot,
+        sessionSnapshot,
+        sessionReady ? 'exists' : 'will be created after first successful scrape',
+      );
+      this.stepLog('android.snapshot.load', {
+        avdName,
+        loadSnapshot,
+        sessionSnapshot,
+        baselineSnapshot,
+        sessionReady,
+      });
+      emulatorArgs.push('-snapshot', loadSnapshot, '-no-snapshot-save');
     }
 
     const proc = spawn('emulator', emulatorArgs, {

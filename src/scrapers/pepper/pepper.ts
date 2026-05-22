@@ -46,6 +46,16 @@ const PEPPER_HOME_DASHBOARD_READY_SELECTORS: readonly string[] = [
   ua('descriptionContains("חסכונות")'),
 ];
 
+const PEPPER_PROFILE_SCREEN_SELECTORS: readonly string[] = [
+  ua('textContains("פרטי חשבון")'),
+  ua('textContains("פרופיל")'),
+  ua('descriptionContains("פרופיל")'),
+  ua('textContains("העתק")'),
+  ua('descriptionContains("העתק")'),
+  '//*[contains(@text,"העתקת") or contains(@content-desc,"העתקת")]',
+  '//*[contains(@text,"מספר חשבון") or contains(@content-desc,"מספר חשבון")]',
+];
+
 const PEPPER_LOGGED_IN_SELECTORS: readonly string[] = [
   ...PEPPER_HOME_DASHBOARD_READY_SELECTORS,
   ...PEPPER_BOTTOM_NAV_HOME_SELECTORS,
@@ -603,6 +613,120 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     return undefined;
   }
 
+  private async isPepperLoginScreen(): Promise<boolean> {
+    if (await this.isAnyVisible(PEPPER_PHONE_SELECTORS_STRICT, 1_200)) {
+      return true;
+    }
+    if (await this.isAnyVisible(PEPPER_WELCOME_CONTINUE_SELECTORS, 900)) {
+      return true;
+    }
+    return this.isAnyVisible(PEPPER_PASSWORD_SELECTORS, 900);
+  }
+
+  private async isPepperAuthenticatedAppScreen(): Promise<boolean> {
+    if (await this.isPepperLoginScreen()) {
+      return false;
+    }
+    if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 1_500)) {
+      return true;
+    }
+    if (await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 1_500)) {
+      return true;
+    }
+    if (await this.isAnyVisible(PEPPER_PROFILE_SCREEN_SELECTORS, 1_500)) {
+      return true;
+    }
+    return this.isAnyVisible(PEPPER_HOME_TAB_SELECTORS, 1_200);
+  }
+
+  /**
+   * After a session snapshot load the app may reopen on profile or another sub-screen.
+   * Return to the home dashboard before login checks or before saving a new snapshot.
+   */
+  private async ensurePepperSessionUiReady(): Promise<void> {
+    await this.dismissNotificationPopupIfPresent();
+    await sleep(900);
+
+    if (await this.isPepperLoginScreen()) {
+      // After force-stop relaunch, Pepper briefly shows the phone/login screen
+      // before reading its auth token from AsyncStorage and navigating to home.
+      // Wait to distinguish a transient startup state from a genuine login-required state.
+      if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 8_000)) {
+        // App navigated to home — fall through; snapshot will be saved on home screen
+      } else {
+        return;  // Still on login screen after grace period — needs re-authentication
+      }
+    }
+
+    if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 2_000)) {
+      return;
+    }
+
+    // Profile screen: the in-app back button has no accessible label — tap it now before
+    // entering the slow recovery loop (saves ~2 minutes of fruitless back/home-tab attempts).
+    if (await this.isAnyVisible(PEPPER_PROFILE_SCREEN_SELECTORS, 1_500)) {
+      this.tapPepperProfileBackButton();
+      await sleep(900);
+      if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 3_000)) {
+        return;
+      }
+    }
+
+    this.stepLog('pepper.session.restore_ui', {});
+    debug('Restoring Pepper UI to home (session snapshot may have opened off-dashboard)');
+
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 1_400)) {
+        return;
+      }
+
+      if (await this.isPepperLoginScreen()) {
+        return;
+      }
+
+      // Profile screen may reappear (e.g. navigation state restoration) — tap back button.
+      if (await this.isAnyVisible(PEPPER_PROFILE_SCREEN_SELECTORS, 800)) {
+        this.tapPepperProfileBackButton();
+        await sleep(800);
+        continue;
+      }
+
+      if (await this.isAnyVisible(PEPPER_HOME_TAB_SELECTORS, 1_000)) {
+        try {
+          await this.tapAny(PEPPER_HOME_TAB_SELECTORS, 6_000);
+          await sleep(700);
+          if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 6_000)) {
+            return;
+          }
+          // Home tab was tapped — don't press Back (would undo the navigation).
+          // Next iteration will re-check the dashboard.
+          continue;
+        } catch {
+          /* try back navigation next */
+        }
+      }
+
+      await this.pressAndroidBack();
+      await sleep(550);
+    }
+
+    try {
+      await this.ensurePepperHomeDashboard();
+    } catch (e) {
+      debug(
+        'ensurePepperHomeDashboard after session UI restore failed: %s',
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+
+  protected override async prepareEmulatorSnapshotState(): Promise<void> {
+    // Close the app before saving the snapshot so the next run always starts
+    // Pepper fresh via Appium — no stale navigation state to restore profile.
+    this.spawnAdb(['am', 'force-stop', PACKAGE_NAME]);
+    await sleep(600);
+  }
+
   private async dismissWelcomeIfPresent(): Promise<void> {
     const hit = await this.isAnyVisible(PEPPER_WELCOME_CONTINUE_SELECTORS, 8_000);
     if (!hit) {
@@ -721,6 +845,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
 
   private async pollLoggedInOrOtpAfterPassword(totalMs: number): Promise<'logged_in' | 'otp'> {
     const deadline = Date.now() + totalMs;
+    let blankCycles = 0;
     while (Date.now() < deadline) {
       // Check OTP first: it appears in milliseconds after the server validates credentials.
       // Checking it before the 23-selector logged-in list saves ~2 s per poll iteration.
@@ -734,10 +859,19 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       if (await this.isAnyVisible(PEPPER_TERMS_SCREEN_SELECTORS, 450)) {
         this.stepLog('pepper.login.terms_after_password', {});
         await this.acceptTermsIfPresent(12_000);
+        blankCycles = 0;
         continue;
       }
       if (await this.isLoginChromeVisible()) {
         await this.tapPostCredentialsSubmitOptional();
+        blankCycles = 0;
+        continue;
+      }
+      // After a few blank cycles, dismiss any system overlay (e.g. Google Password Manager)
+      // that may be covering the OTP screen or home screen.
+      blankCycles++;
+      if (blankCycles % 3 === 0) {
+        await this.ensurePepperForegroundClosingForeignApps();
       }
       await sleep(420);
     }
@@ -857,16 +991,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       }
     }
 
-    if (await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 800)) {
-      debug('OTP auto-verified by Pepper (SMS auto-detect); already on home screen');
-      return;
-    }
-
-    if (await this.isAnyVisible(PEPPER_PHONE_SELECTORS_STRICT, 600)) {
-      throw new Error('Returned to login screen while waiting for OTP — re-run the scraper');
-    }
-
-    // After the WebDriverIO queries above, check actual keyboard state.
+    // Check actual keyboard state.
     // If it is already open we go straight to typing — no tap needed.
     const keyboardOpen = this.isAndroidKeyboardShown();
     debug('OTP keyboard state: %s', keyboardOpen ? 'open' : 'closed');
@@ -960,16 +1085,14 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       };
     }
 
-    // Fast-path: if the login form (phone/password fields) is immediately visible
-    // (e.g. when booting from the scraper-baseline snapshot), skip the logged-in
-    // check and the welcome-screen dismiss — both waste several seconds when we're
-    // already on the login form.
-    const loginFormVisible = await this.isAnyVisible(PEPPER_PHONE_SELECTORS_STRICT, 2_000);
+    await this.ensurePepperSessionUiReady();
+
+    const loginFormVisible = await this.isPepperLoginScreen();
 
     if (!loginFormVisible) {
-      debug('Login form not immediately visible — checking if already logged in');
-      const alreadyLoggedIn = await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 5_000);
-      if (alreadyLoggedIn) {
+      debug('Login form not visible — checking if already logged in');
+      if (await this.isPepperAuthenticatedAppScreen()) {
+        await this.ensurePepperSessionUiReady();
         debug('Existing session found, skipping login');
         return { success: true };
       }
@@ -1005,6 +1128,10 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     await this.dismissKeyboard();
     await sleep(1_100);
 
+    // Google Password Manager and other autofill overlays can appear after password entry,
+    // covering the OTP screen or the sign-in button. Dismiss before checking app state.
+    await this.ensurePepperForegroundClosingForeignApps();
+
     // Check OTP first (server often auto-triggers it the moment valid credentials are typed),
     // then home screen, then sign-in button — in order from most likely to least likely.
     if (await this.isOtpPhaseVisible()) {
@@ -1015,8 +1142,11 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       try {
         await this.tapAny(PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS, 14_000);
       } catch (e) {
+        // Overlay may have appeared during the tap attempt — dismiss and recheck.
+        await this.ensurePepperForegroundClosingForeignApps();
+        await sleep(500);
         if (await this.isOtpPhaseVisible()) {
-          debug('OTP appeared while waiting for sign-in button');
+          debug('OTP appeared (was obscured by overlay)');
         } else if (await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 3_000)) {
           debug('Home visible after sign-in button timeout — continuing');
         } else {
@@ -1381,12 +1511,28 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     return;
   }
 
+  /**
+   * Tap the in-app back button on the Pepper profile/account screen.
+   *
+   * The button (RTL '>' chevron, top-right of screen) has no text or content-desc,
+   * so it cannot be found by UiSelector or XPath. Coordinates are derived from a
+   * uiautomator dump: bounds=[1112,471][1232,591] on a 1280×2856 screen (91.6% / 18.6%).
+   */
+  private tapPepperProfileBackButton(): void {
+    this.stepLog('pepper.session.profile_back', {});
+    // Back button has no accessible label (rid='pressable', content-desc='', text='').
+    // Confirmed coords from uiautomator dump: bounds=[1112,471][1232,591] on 1280×2856.
+    this.spawnAdb(['input', 'tap', '1172', '531']);
+  }
+
   private async readAccountNumberFromProfileClipboard(): Promise<string | undefined> {
     await this.ensurePepperHomeDashboard();
     try {
       await this.openPepperProfileFromHome();
     } catch (e) {
       debug('openPepperProfileFromHome: %s', e instanceof Error ? e.message : String(e));
+      // Profile navigation may have partially started; ensure we're back on home.
+      await this.ensurePepperSessionUiReady().catch(() => undefined);
       return undefined;
     }
 
@@ -1401,14 +1547,15 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
         .perform();
     } catch (e) {
       debug('pepper profile copy control: %s', e instanceof Error ? e.message : String(e));
-      await this.pressAndroidBack();
-      await this.ensurePepperHomeDashboard().catch(() => undefined);
+      this.spawnAdb(['am', 'force-stop', PACKAGE_NAME]);
       return undefined;
     }
 
     const clip = await this.readAndroidClipboardPlaintext();
-    await this.pressAndroidBack();
-    await this.ensurePepperHomeDashboard().catch(() => undefined);
+    // Close the app — navigation back from the profile page is unreliable.
+    // prepareEmulatorSnapshotState will save the snapshot with Pepper closed;
+    // on the next run Appium launches it fresh at the login/home screen.
+    this.spawnAdb(['am', 'force-stop', PACKAGE_NAME]);
     if (!clip) {
       return undefined;
     }

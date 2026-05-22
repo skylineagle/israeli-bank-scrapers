@@ -13,6 +13,7 @@ if (!PHONE || !PASSWORD) {
   console.error('Usage: PEPPER_PHONE=0501234567 PEPPER_PASSWORD=secret bun test.ts');
   console.error('       PEPPER_PHONE=... PEPPER_PASSWORD=... PEPPER_PROBE=1 bun test.ts   # UI probe JSON only');
   console.error('       PEPPER_PHONE=0501234567 PEPPER_PASSWORD=secret PEPPER_AVD=Pixel_9_API_35 bun test.ts');
+  console.error('       ANDROID_FORCE_BASELINE=1  boot logged-out baseline (reset session snapshot)');
   process.exit(1);
 }
 
@@ -51,6 +52,9 @@ if (process.env.PEPPER_PROBE === '1') {
 
 console.log(`Starting Pepper scraper…  phone=${PHONE}  from=${START_DATE.toDateString()}`);
 if (AVD) console.log(`AVD: ${AVD}`);
+console.log(
+  'Snapshot: first run boots scraper-baseline (OTP once); after a successful scrape saves scraper-session for later runs.',
+);
 
 const result = await scraper.scrape({
   phoneNumber: PHONE,
