@@ -999,15 +999,21 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   // ---------------------------------------------------------------------------
 
   async runProbeSession(credentials: PepperCredentials): Promise<PepperDashboardProbeResult> {
-    await this.initialize();
-    const loginResult = await this.login(credentials);
-    if (!loginResult.success) {
-      await this.terminate(false);
-      throw new Error(loginResult.errorMessage ?? 'Pepper login failed');
+    let ok = false;
+    try {
+      await this.initialize();
+      const loginResult = await this.login(credentials);
+      if (!loginResult.success) {
+        throw new Error(loginResult.errorMessage ?? 'Pepper login failed');
+      }
+      const probe = await this.probeDashboard();
+      ok = true;
+      return probe;
+    } finally {
+      await this.terminate(ok).catch(error => {
+        debug('runProbeSession terminate failed: %s', errorMessage(error));
+      });
     }
-    const probe = await this.probeDashboard();
-    await this.terminate(true);
-    return probe;
   }
 
   async probeDashboard(): Promise<PepperDashboardProbeResult> {

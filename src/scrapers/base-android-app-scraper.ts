@@ -1,9 +1,6 @@
 import { execSync, spawn, spawnSync, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
-import { type Browser, remote } from 'webdriverio';
-import { ScraperProgressTypes } from '../definitions';
-import { getDebug } from '../helpers/debug';
-import { registerAndroidProcessCleanup, unregisterAndroidProcessCleanup } from '../helpers/android-process-cleanup';
+import { remote, type Browser } from 'webdriverio';
 import { adbDeviceTargetArgs, listAttachedEmulatorSerials, runAdbShell } from '../helpers/android-adb';
 import {
   DEFAULT_ANDROID_BASELINE_SNAPSHOT,
@@ -12,10 +9,12 @@ import {
   resolveEmulatorSnapshotNames,
 } from '../helpers/android-emulator-snapshots';
 import { resolveAndroidLauncherAppActivity } from '../helpers/android-launcher';
+import { registerAndroidProcessCleanup, unregisterAndroidProcessCleanup } from '../helpers/android-process-cleanup';
+import { getDebug } from '../helpers/debug';
 import { stripBidiAndTrim } from '../helpers/text';
+import { sleep } from '../helpers/waiting';
 import { BaseScraper } from './base-scraper';
 import { type AndroidScraperOptions, type ScraperCredentials } from './interface';
-import { sleep } from '../helpers/waiting';
 
 const debug = getDebug('android-app-scraper');
 const stepsDebug = getDebug('steps');
@@ -382,8 +381,6 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
 
   override async initialize(): Promise<void> {
     await super.initialize();
-    this.emitProgress(ScraperProgressTypes.Initializing);
-
     await this.ensureEmulatorRunning();
     await this.ensureAppiumRunning();
 

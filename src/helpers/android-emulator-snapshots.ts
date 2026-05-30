@@ -5,8 +5,16 @@ import { join } from 'path';
 export const DEFAULT_ANDROID_BASELINE_SNAPSHOT = 'scraper-baseline';
 export const DEFAULT_ANDROID_SESSION_SNAPSHOT = 'scraper-session';
 
+export function avdBaseDirectory(): string {
+  const fromEnv = process.env.ANDROID_AVD_HOME?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+  return join(homedir(), '.android', 'avd');
+}
+
 export function avdDataDirectory(avdName: string): string {
-  return join(homedir(), '.android', 'avd', `${avdName}.avd`);
+  return join(avdBaseDirectory(), `${avdName}.avd`);
 }
 
 export function emulatorSnapshotExists(avdName: string, snapshotName: string): boolean {

@@ -1,5 +1,5 @@
-import { mkdirSync, rmSync } from 'fs';
-import { homedir } from 'os';
+import { mkdirSync, mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   DEFAULT_ANDROID_BASELINE_SNAPSHOT,
@@ -11,8 +11,11 @@ import {
 
 const TEST_AVD = '__ibs_snapshot_test_avd__';
 
+let testAvdHome: string;
+const originalAndroidAvdHome = process.env.ANDROID_AVD_HOME;
+
 function testAvdDir(): string {
-  return join(homedir(), '.android', 'avd', `${TEST_AVD}.avd`);
+  return join(testAvdHome, `${TEST_AVD}.avd`);
 }
 
 function testSnapshotDir(snapshotName: string): string {
@@ -21,11 +24,18 @@ function testSnapshotDir(snapshotName: string): string {
 
 describe('android-emulator-snapshots', () => {
   beforeAll(() => {
+    testAvdHome = mkdtempSync(join(tmpdir(), 'ibs-avd-test-'));
+    process.env.ANDROID_AVD_HOME = testAvdHome;
     mkdirSync(testSnapshotDir(DEFAULT_ANDROID_BASELINE_SNAPSHOT), { recursive: true });
   });
 
   afterAll(() => {
-    rmSync(testAvdDir(), { recursive: true, force: true });
+    rmSync(testAvdHome, { recursive: true, force: true });
+    if (originalAndroidAvdHome === undefined) {
+      delete process.env.ANDROID_AVD_HOME;
+    } else {
+      process.env.ANDROID_AVD_HOME = originalAndroidAvdHome;
+    }
   });
 
   it('detects an existing snapshot directory', () => {
