@@ -870,8 +870,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
           continue;
         }
         gathered.push(...extractForeignCurrencyAmountsFromText(text));
-      } catch {
-      }
+      } catch {}
     }
 
     const deduped = dedupeCurrencyAmounts(gathered);

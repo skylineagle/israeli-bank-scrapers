@@ -56,17 +56,21 @@ describe('Pepper scraper', () => {
     PEPPER_TEST_TIMEOUT_MS,
   );
 
-  maybeTestCompanyAPI(COMPANY_ID)('should scrape transactions"', async () => {
-    const scraper = new PepperScraper(pepperScraperOptions());
-    const result = await scraper.scrape({
-      ...testsConfig.credentials.pepper,
-      otpCodeRetriever: pepperOtpCodeRetriever,
-    });
-    expect(result).toBeDefined();
-    const error = `${result.errorType || ''} ${result.errorMessage || ''}`.trim();
-    expect(error).toBe('');
-    expect(result.success).toBeTruthy();
+  maybeTestCompanyAPI(COMPANY_ID)(
+    'should scrape transactions"',
+    async () => {
+      const scraper = new PepperScraper(pepperScraperOptions());
+      const result = await scraper.scrape({
+        ...testsConfig.credentials.pepper,
+        otpCodeRetriever: pepperOtpCodeRetriever,
+      });
+      expect(result).toBeDefined();
+      const error = `${result.errorType || ''} ${result.errorMessage || ''}`.trim();
+      expect(error).toBe('');
+      expect(result.success).toBeTruthy();
 
-    exportTransactions(COMPANY_ID, result.accounts || []);
-  }, PEPPER_TEST_TIMEOUT_MS);
+      exportTransactions(COMPANY_ID, result.accounts || []);
+    },
+    PEPPER_TEST_TIMEOUT_MS,
+  );
 });

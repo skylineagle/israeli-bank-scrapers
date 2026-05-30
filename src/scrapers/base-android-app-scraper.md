@@ -9,13 +9,13 @@ only implement `appPackage`, `login()`, and `fetchData()`.
 
 ## Related files
 
-| File | Responsibility |
-| --- | --- |
-| `base-android-app-scraper.ts` | Base class: boot, Appium, snapshots, UI helpers. |
-| `../helpers/android-adb.ts` | Shared adb/device helpers. |
-| `../helpers/android-emulator-snapshots.ts` | Snapshot name resolution and existence checks. |
-| `../helpers/android-launcher.ts` | Resolve an app's launcher activity. |
-| `../helpers/android-process-cleanup.ts` | Kill owned emulator/Appium processes on exit. |
+| File                                       | Responsibility                                   |
+| ------------------------------------------ | ------------------------------------------------ |
+| `base-android-app-scraper.ts`              | Base class: boot, Appium, snapshots, UI helpers. |
+| `../helpers/android-adb.ts`                | Shared adb/device helpers.                       |
+| `../helpers/android-emulator-snapshots.ts` | Snapshot name resolution and existence checks.   |
+| `../helpers/android-launcher.ts`           | Resolve an app's launcher activity.              |
+| `../helpers/android-process-cleanup.ts`    | Kill owned emulator/Appium processes on exit.    |
 
 ## Prerequisites
 
@@ -56,20 +56,20 @@ Override snapshot names with constructor options or env vars (see table below).
 
 ## Constructor options and environment variables
 
-| Option (constructor) | Env var | Effect |
-| --- | --- | --- |
-| `avdName` | — | Which AVD to boot. |
-| `appiumPort` | — | Appium port (default `4723`). |
-| `shutdownEmulatorOnTerminate` | — | Kill the emulator on terminate (default `true` when the scraper booted it). |
-| `persistEmulatorSession` | `ANDROID_NO_SESSION_SNAPSHOT=1` (to disable) | Save `scraper-session` after success (default `true`). |
-| `forceBaselineSnapshot` | `ANDROID_FORCE_BASELINE=1` | Ignore `scraper-session` and boot from baseline (forces re-login/OTP). |
-| `snapshotName` | `ANDROID_SNAPSHOT_NAME` | Explicit snapshot to load. |
-| `baselineSnapshotName` | `ANDROID_BASELINE_SNAPSHOT_NAME` | Override default baseline name (`scraper-baseline`). |
-| `sessionSnapshotName` | `ANDROID_SESSION_SNAPSHOT_NAME` | Override default session name (`scraper-session`). |
-| — | `ANDROID_COLD_BOOT=1` | Cold boot (no snapshot load/save). |
-| — | `DEBUG_ANDROID_EMULATOR_GUI=1` | Show the emulator window (otherwise `-no-window`). |
-| — | `ANDROID_SERIAL` | Target a specific device when several are attached. |
-| — | `DEBUG=israeli-bank-scrapers:*` | Enable debug + step logs. |
+| Option (constructor)          | Env var                                      | Effect                                                                      |
+| ----------------------------- | -------------------------------------------- | --------------------------------------------------------------------------- |
+| `avdName`                     | —                                            | Which AVD to boot.                                                          |
+| `appiumPort`                  | —                                            | Appium port (default `4723`).                                               |
+| `shutdownEmulatorOnTerminate` | —                                            | Kill the emulator on terminate (default `true` when the scraper booted it). |
+| `persistEmulatorSession`      | `ANDROID_NO_SESSION_SNAPSHOT=1` (to disable) | Save `scraper-session` after success (default `true`).                      |
+| `forceBaselineSnapshot`       | `ANDROID_FORCE_BASELINE=1`                   | Ignore `scraper-session` and boot from baseline (forces re-login/OTP).      |
+| `snapshotName`                | `ANDROID_SNAPSHOT_NAME`                      | Explicit snapshot to load.                                                  |
+| `baselineSnapshotName`        | `ANDROID_BASELINE_SNAPSHOT_NAME`             | Override default baseline name (`scraper-baseline`).                        |
+| `sessionSnapshotName`         | `ANDROID_SESSION_SNAPSHOT_NAME`              | Override default session name (`scraper-session`).                          |
+| —                             | `ANDROID_COLD_BOOT=1`                        | Cold boot (no snapshot load/save).                                          |
+| —                             | `DEBUG_ANDROID_EMULATOR_GUI=1`               | Show the emulator window (otherwise `-no-window`).                          |
+| —                             | `ANDROID_SERIAL`                             | Target a specific device when several are attached.                         |
+| —                             | `DEBUG=israeli-bank-scrapers:*`              | Enable debug + step logs.                                                   |
 
 ## Implementing a new emulator-based scraper
 

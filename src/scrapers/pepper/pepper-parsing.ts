@@ -7,7 +7,6 @@ const AMOUNT_FRAGMENT = String.raw`[\d,.\-+]+`;
 const ILS_SYMBOL_PATTERN = '₪|\\u20aa';
 const ISO_CURRENCY_CODES_PATTERN = 'USD|EUR|GBP|CHF|JPY|CAD|AUD|PLN';
 
-
 /** Currency symbols in the priority order used to pick a single amount from compound text. */
 const SYMBOL_CURRENCIES: readonly SymbolCurrency[] = [
   { currency: 'ILS', symbolPattern: ILS_SYMBOL_PATTERN },
