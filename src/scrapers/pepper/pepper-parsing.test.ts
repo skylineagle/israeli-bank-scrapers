@@ -2,7 +2,7 @@ import {
   extractForeignCurrencyAmountsFromText,
   normalizePepperAccountNumber,
   parseCurrencyAmountSnippet,
-} from './pepper';
+} from './pepper-parsing';
 
 describe('Pepper amount and account parsing', () => {
   test('parseCurrencyAmountSnippet ILS with leading shekel', () => {

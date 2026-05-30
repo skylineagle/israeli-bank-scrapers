@@ -4,6 +4,7 @@ import { type Browser, remote } from 'webdriverio';
 import { ScraperProgressTypes } from '../definitions';
 import { getDebug } from '../helpers/debug';
 import { registerAndroidProcessCleanup, unregisterAndroidProcessCleanup } from '../helpers/android-process-cleanup';
+import { adbDeviceTargetArgs, listAttachedEmulatorSerials, runAdbShell } from '../helpers/android-adb';
 import {
   DEFAULT_ANDROID_BASELINE_SNAPSHOT,
   DEFAULT_ANDROID_SESSION_SNAPSHOT,
@@ -11,6 +12,7 @@ import {
   resolveEmulatorSnapshotNames,
 } from '../helpers/android-emulator-snapshots';
 import { resolveAndroidLauncherAppActivity } from '../helpers/android-launcher';
+import { stripBidiAndTrim } from '../helpers/text';
 import { BaseScraper } from './base-scraper';
 import { type ScraperCredentials, type ScraperOptions } from './interface';
 import { sleep } from '../helpers/waiting';
@@ -21,49 +23,20 @@ const stepsDebug = getDebug('steps');
 const APPIUM_HOST = 'localhost';
 const DEFAULT_APPIUM_PORT = 4723;
 const DEFAULT_WAIT_MS = 15_000;
+const DEFAULT_CONDITION_POLL_MS = 350;
 const SCROLL_DURATION_MS = 600;
 const EMULATOR_BOOT_TIMEOUT_MS = 180_000;
 const APPIUM_READY_TIMEOUT_MS = 30_000;
 const EMULATOR_SHUTDOWN_TIMEOUT_MS = 20_000;
 const SESSION_SNAPSHOT_SAVE_TIMEOUT_MS = 45_000;
+const KEYCODE_BACK = 4;
+const ANDROID_KEYCODE_DIGIT_ZERO = 7; // KEYCODE_0; the keycode for digit n is ANDROID_KEYCODE_DIGIT_ZERO + n.
+const ZERO_CHARACTER_CODE = '0'.charCodeAt(0);
 
-function listAdbDeviceSerials(): string[] {
-  try {
-    const output = execSync('adb devices', { encoding: 'utf8', timeout: 2_000 });
-    return output
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => /\S+\s+device$/.test(line) && !line.startsWith('List'))
-      .map(line => line.split(/\s+/)[0]);
-  } catch {
-    return [];
-  }
-}
-
-function adbBaseArgs(): string[] {
-  const env = process.env.ANDROID_SERIAL?.trim();
-  if (env) {
-    return ['-s', env];
-  }
-  const serials = listAdbDeviceSerials();
-  if (serials.length === 1) {
-    return ['-s', serials[0]];
-  }
-  return [];
-}
-
-function listAttachedEmulatorSerials(): string[] {
-  try {
-    const output = execSync('adb devices', { encoding: 'utf8', timeout: 8_000 });
-    return output
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => /^emulator-\d+\s+device$/.test(line))
-      .map(line => line.split(/\s+/)[0]);
-  } catch {
-    return [];
-  }
-}
+type AccessibleElement = {
+  getText: () => Promise<string>;
+  getAttribute: (name: string) => Promise<string | null>;
+};
 
 type AndroidScraperOptions = ScraperOptions & {
   avdName?: string;
@@ -122,7 +95,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   }
 
   private resetStaleUiAutomator2Servers(): void {
-    const adb = adbBaseArgs();
+    const adb = adbDeviceTargetArgs();
     const pkgs = ['io.appium.uiautomator2.server', 'io.appium.uiautomator2.server.test'];
     for (const pkg of pkgs) {
       const check = spawnSync('adb', [...adb, 'shell', 'pm', 'path', pkg], { encoding: 'utf8', timeout: 10_000 });
@@ -339,6 +312,15 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     await this.ensureTargetAppForeground(caps['appium:appActivity']);
   }
 
+  private isSessionLostFailure(message: string): boolean {
+    const lower = message.toLowerCase();
+    return (
+      lower.includes('invalid session id') ||
+      (lower.includes('session') && lower.includes('terminated')) ||
+      (lower.includes('new session') && lower.includes('could not'))
+    );
+  }
+
   private async withUiAutomatorRetry<T>(operation: () => Promise<T>): Promise<T> {
     let lastErr: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -346,13 +328,25 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
         return await operation();
       } catch (e) {
         lastErr = e;
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!this.isRecoverableWebDriverInfrastructureFailure(msg) || attempt >= 2) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (!this.isRecoverableWebDriverInfrastructureFailure(message) || attempt >= 2) {
           throw e;
         }
 
-        debug('UiAutomator2 recovery pass %d/3 after: %s', attempt + 1, msg.replace(/\s+/g, ' ').slice(0, 170));
-        await this.recoverUiAutomatorSession();
+        // The first blip on a live session is usually transient (the app is mid-transition, e.g.
+        // right after login). Retry without the slow session teardown + UiAutomator2 reinstall.
+        // Escalate to a full session recovery only if it recurs or the session is clearly lost.
+        const useLightRecovery = attempt === 0 && !this.isSessionLostFailure(message);
+        this.stepLog('android.uiautomator.recover', {
+          attempt: attempt + 1,
+          mode: useLightRecovery ? 'light' : 'session',
+          message: message.replace(/\s+/g, ' ').slice(0, 160),
+        });
+        if (useLightRecovery) {
+          await sleep(1_500);
+        } else {
+          await this.recoverUiAutomatorSession();
+        }
       }
     }
 
@@ -379,6 +373,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
           throw e;
         }
 
+        this.stepLog('android.session.create_retry', {
+          attempt: attempt + 1,
+          message: msg.replace(/\s+/g, ' ').slice(0, 160),
+        });
         debug(
           'WebDriver session create failed (attempt %d/3): %s — resetting UiAutomator2 helpers',
           attempt + 1,
@@ -449,15 +447,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
 
   /**
    * Run an `adb shell` command against the connected device, returning stdout+stderr.
-   * Uses adbBaseArgs() so it targets the correct device when multiple are attached.
+   * Targets the correct device when multiple are attached (see adbDeviceTargetArgs).
    */
   protected spawnAdb(shellArgs: readonly string[]): string {
-    const r = spawnSync('adb', [...adbBaseArgs(), 'shell', ...shellArgs], {
-      encoding: 'utf8',
-      timeout: 10_000,
-      maxBuffer: 1024 * 1024,
-    });
-    return ((r.stdout ?? '') + (r.stderr ?? '')).trim();
+    return runAdbShell(shellArgs);
   }
 
   protected async readForegroundPackage(): Promise<string> {
@@ -471,7 +464,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
       }
     }
 
-    const adbArgs = adbBaseArgs();
+    const adbArgs = adbDeviceTargetArgs();
 
     try {
       const r = spawnSync('adb', [...adbArgs, 'shell', 'dumpsys', 'window', 'displays'], {
@@ -530,7 +523,17 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     debug('Trying adb am start -n %s', component);
     spawnSync(
       'adb',
-      [...adbBaseArgs(), 'shell', 'am', 'start', '-W', '-c', 'android.intent.category.LAUNCHER', '-n', component],
+      [
+        ...adbDeviceTargetArgs(),
+        'shell',
+        'am',
+        'start',
+        '-W',
+        '-c',
+        'android.intent.category.LAUNCHER',
+        '-n',
+        component,
+      ],
       {
         encoding: 'utf8',
         timeout: 60_000,
@@ -546,7 +549,16 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     debug('Trying adb monkey (known-good manual launch)');
     spawnSync(
       'adb',
-      [...adbBaseArgs(), 'shell', 'monkey', '-p', this.appPackage, '-c', 'android.intent.category.LAUNCHER', '1'],
+      [
+        ...adbDeviceTargetArgs(),
+        'shell',
+        'monkey',
+        '-p',
+        this.appPackage,
+        '-c',
+        'android.intent.category.LAUNCHER',
+        '1',
+      ],
       {
         encoding: 'utf8',
         timeout: 25_000,
@@ -635,7 +647,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     debug('Waiting for Android boot to complete…');
     while (Date.now() < deadline) {
       try {
-        const r = spawnSync('adb', [...adbBaseArgs(), 'shell', 'getprop', 'sys.boot_completed'], {
+        const r = spawnSync('adb', [...adbDeviceTargetArgs(), 'shell', 'getprop', 'sys.boot_completed'], {
           encoding: 'utf8',
           timeout: 5_000,
         });
@@ -849,12 +861,97 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
         pressKeyCode?: (code: number, metaState?: number) => Promise<void>;
       };
       if (typeof driverLike.pressKeyCode === 'function') {
-        await driverLike.pressKeyCode(4);
+        await driverLike.pressKeyCode(KEYCODE_BACK);
         return;
       }
-      await this.driver.execute('mobile: pressKey', { keycode: 4 });
+      await this.driver.execute('mobile: pressKey', { keycode: KEYCODE_BACK });
     });
     await sleep(350);
+  }
+
+  /**
+   * Poll an async predicate until it resolves true or the timeout elapses.
+   * Prefer this over fixed sleeps when waiting for an app state that has no single element to await.
+   */
+  protected async waitForCondition(
+    predicate: () => Promise<boolean>,
+    options: { timeoutMs?: number; intervalMs?: number } = {},
+  ): Promise<boolean> {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_WAIT_MS;
+    const intervalMs = options.intervalMs ?? DEFAULT_CONDITION_POLL_MS;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await predicate()) {
+        return true;
+      }
+      await sleep(intervalMs);
+    }
+    return false;
+  }
+
+  /** Read the combined text + accessibility labels of an element, de-duplicated and bidi-cleaned. */
+  protected async readAccessibleText(element: AccessibleElement): Promise<string> {
+    const chunks: string[] = [];
+    const addChunk = (value: string): void => {
+      const cleaned = stripBidiAndTrim(value);
+      if (cleaned.length > 0 && cleaned.toLowerCase() !== 'null' && !chunks.includes(cleaned)) {
+        chunks.push(cleaned);
+      }
+    };
+
+    try {
+      addChunk(await element.getText());
+    } catch {
+      /* element may not expose getText */
+    }
+    for (const attribute of ['content-desc', 'contentDescription', 'name', 'text']) {
+      try {
+        const value = await element.getAttribute(attribute);
+        if (value != null && String(value).trim() !== '' && String(value).toLowerCase() !== 'null') {
+          addChunk(String(value));
+        }
+      } catch {
+        /* attribute not present on this element */
+      }
+    }
+    return stripBidiAndTrim(chunks.join(' '));
+  }
+
+  /** Tap an absolute screen coordinate via `adb shell input tap` (for controls with no accessible selector). */
+  protected tapByCoordinates(x: number, y: number): void {
+    this.spawnAdb(['input', 'tap', String(Math.round(x)), String(Math.round(y))]);
+  }
+
+  private digitToKeycode(character: string): number {
+    const digit = character.charCodeAt(0) - ZERO_CHARACTER_CODE;
+    if (digit < 0 || digit > 9) {
+      throw new Error(`Expected a single digit, received ${JSON.stringify(character)}`);
+    }
+    return ANDROID_KEYCODE_DIGIT_ZERO + digit;
+  }
+
+  /** Type digits through the WebDriver pressKeyCode API. Throws if the driver does not support it. */
+  protected async pressDigitsViaDriverKeyCode(digits: string): Promise<void> {
+    const driverLike = this.driver as unknown as {
+      pressKeyCode?: (code: number, metaState?: number) => Promise<void>;
+    };
+    if (typeof driverLike.pressKeyCode !== 'function') {
+      throw new Error('driver.pressKeyCode is not available on this session');
+    }
+    for (const character of digits) {
+      await driverLike.pressKeyCode(this.digitToKeycode(character));
+    }
+  }
+
+  /** Type digits through `adb shell input keyevent`, the most reliable path for custom keyboards. */
+  protected async pressDigitsViaAdbKeyevent(digits: string, perKeyDelayMs = 80): Promise<void> {
+    for (const character of digits) {
+      this.spawnAdb(['input', 'keyevent', String(this.digitToKeycode(character))]);
+      if (perKeyDelayMs > 0) {
+        // Short debounce so the input system registers each discrete keyevent.
+        await sleep(perKeyDelayMs);
+      }
+    }
   }
 
   protected async readAndroidClipboardPlaintext(): Promise<string> {

@@ -9,4 +9,8 @@ module.exports = {
   useTabs: false,
   arrowParens: 'avoid',
   parser: 'typescript', // Since this is a TypeScript project
+  overrides: [
+    { files: '*.md', options: { parser: 'markdown' } },
+    { files: '*.json', options: { parser: 'json' } },
+  ],
 };

@@ -28,46 +28,39 @@ export class BaseScraper<TCredentials extends ScraperCredentials> implements Scr
 
   async scrape(credentials: TCredentials): Promise<ScraperScrapingResult> {
     this.emitProgress(ScraperProgressTypes.StartScraping);
-    let scrapeResult: ScraperScrapingResult | undefined;
+    await this.initialize();
 
+    let loginResult;
     try {
-      await this.initialize();
+      loginResult = await this.login(credentials);
+    } catch (e) {
+      loginResult =
+        e instanceof TimeoutError ? createTimeoutError((e as Error).message) : createGenericError((e as Error).message);
+    }
 
-      let loginResult;
+    let scrapeResult;
+    if (loginResult.success) {
       try {
-        loginResult = await this.login(credentials);
+        scrapeResult = await this.fetchData();
       } catch (e) {
-        loginResult =
+        scrapeResult =
           e instanceof TimeoutError
             ? createTimeoutError((e as Error).message)
             : createGenericError((e as Error).message);
       }
-
-      if (loginResult.success) {
-        try {
-          scrapeResult = await this.fetchData();
-        } catch (e) {
-          scrapeResult =
-            e instanceof TimeoutError
-              ? createTimeoutError((e as Error).message)
-              : createGenericError((e as Error).message);
-        }
-      } else {
-        scrapeResult = loginResult;
-      }
-    } catch (e) {
-      scrapeResult = createGenericError((e as Error).message);
-    } finally {
-      try {
-        const success = scrapeResult?.success === true;
-        await this.terminate(success);
-      } catch (e) {
-        scrapeResult = createGenericError((e as Error).message);
-      }
-      this.emitProgress(ScraperProgressTypes.EndScraping);
+    } else {
+      scrapeResult = loginResult;
     }
 
-    return scrapeResult ?? createGenericError('Scrape failed before result');
+    try {
+      const success = scrapeResult && scrapeResult.success === true;
+      await this.terminate(success);
+    } catch (e) {
+      scrapeResult = createGenericError((e as Error).message);
+    }
+    this.emitProgress(ScraperProgressTypes.EndScraping);
+
+    return scrapeResult;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
