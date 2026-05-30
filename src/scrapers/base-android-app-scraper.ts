@@ -1,7 +1,9 @@
 import { execSync, spawn, spawnSync, type ChildProcess } from 'child_process';
+import { randomUUID } from 'crypto';
 import { type Browser, remote } from 'webdriverio';
 import { ScraperProgressTypes } from '../definitions';
 import { getDebug } from '../helpers/debug';
+import { registerAndroidProcessCleanup, unregisterAndroidProcessCleanup } from '../helpers/android-process-cleanup';
 import {
   DEFAULT_ANDROID_BASELINE_SNAPSHOT,
   DEFAULT_ANDROID_SESSION_SNAPSHOT,
@@ -22,6 +24,8 @@ const DEFAULT_WAIT_MS = 15_000;
 const SCROLL_DURATION_MS = 600;
 const EMULATOR_BOOT_TIMEOUT_MS = 180_000;
 const APPIUM_READY_TIMEOUT_MS = 30_000;
+const EMULATOR_SHUTDOWN_TIMEOUT_MS = 20_000;
+const SESSION_SNAPSHOT_SAVE_TIMEOUT_MS = 45_000;
 
 function listAdbDeviceSerials(): string[] {
   try {
@@ -92,6 +96,12 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   private cachedCapabilities?: AppiumCapabilities;
 
   private ownedEmulator = false;
+
+  private emulatorProcess?: ChildProcess;
+
+  private cleanupRegistrationId = randomUUID();
+
+  private terminateFinished = false;
 
   private startedEmulatorSerial?: string;
 
@@ -225,7 +235,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
 
       const r = spawnSync('adb', ['-s', serial, 'emu', 'avd', 'snapshot', 'save', sessionSnapshot], {
         encoding: 'utf8',
-        timeout: 120_000,
+        timeout: SESSION_SNAPSHOT_SAVE_TIMEOUT_MS,
       });
       const out = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim();
       if (r.status !== 0) {
@@ -262,12 +272,57 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
 
   private shutdownOwnedEmulator(): void {
     const serial = this.startedEmulatorSerial ?? listAttachedEmulatorSerials()[0];
-    if (!serial) {
-      return;
+    if (serial) {
+      debug('adb emu kill %s (scraper-launched emulator)', serial);
+      spawnSync('adb', ['-s', serial, 'emu', 'kill'], {
+        encoding: 'utf8',
+        timeout: EMULATOR_SHUTDOWN_TIMEOUT_MS,
+      });
     }
 
-    debug('adb emu kill %s (scraper-launched emulator)', serial);
-    spawnSync('adb', ['-s', serial, 'emu', 'kill'], { encoding: 'utf8', timeout: 40_000 });
+    if (this.emulatorProcess?.pid && !this.emulatorProcess.killed) {
+      debug('Sending SIGTERM to emulator pid %d', this.emulatorProcess.pid);
+      try {
+        process.kill(-this.emulatorProcess.pid, 'SIGTERM');
+      } catch {
+        try {
+          process.kill(this.emulatorProcess.pid, 'SIGKILL');
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
+
+  private stopOwnedAppium(): void {
+    if (!this.ownedAppium || !this.appiumProcess || this.appiumProcess.killed) {
+      return;
+    }
+    debug('Stopping Appium server (started by scraper)');
+    this.appiumProcess.kill('SIGTERM');
+  }
+
+  private emergencyShutdown(): void {
+    if (this.terminateFinished) {
+      return;
+    }
+    this.terminateFinished = true;
+    unregisterAndroidProcessCleanup(this.cleanupRegistrationId);
+
+    if (this.driver) {
+      void this.driver.deleteSession().catch(() => undefined);
+    }
+    this.stopOwnedAppium();
+    if (this.shouldShutdownOwnedEmulator()) {
+      this.shutdownOwnedEmulator();
+    }
+    this.emulatorProcess = undefined;
+  }
+
+  private registerProcessCleanup(): void {
+    registerAndroidProcessCleanup(this.cleanupRegistrationId, () => {
+      this.emergencyShutdown();
+    });
   }
 
   private async recoverUiAutomatorSession(): Promise<void> {
@@ -521,6 +576,12 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   protected async prepareEmulatorSnapshotState(): Promise<void> {}
 
   protected override async terminate(success: boolean): Promise<void> {
+    if (this.terminateFinished) {
+      return;
+    }
+    this.terminateFinished = true;
+    unregisterAndroidProcessCleanup(this.cleanupRegistrationId);
+
     const persistSession = this.shouldPersistEmulatorSession(success);
     if (persistSession) {
       try {
@@ -532,16 +593,14 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     if (this.driver) {
       await this.driver.deleteSession().catch(() => undefined);
     }
-    if (this.ownedAppium && this.appiumProcess && !this.appiumProcess.killed) {
-      debug('Stopping Appium server (started by scraper)');
-      this.appiumProcess.kill();
-    }
+    this.stopOwnedAppium();
     if (persistSession) {
       await this.saveEmulatorSessionSnapshot();
     }
     if (this.shouldShutdownOwnedEmulator()) {
       this.shutdownOwnedEmulator();
     }
+    this.emulatorProcess = undefined;
     await super.terminate(success);
   }
 
@@ -597,6 +656,11 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   private async ensureEmulatorRunning(): Promise<void> {
     if (this.isEmulatorRunning()) {
       debug('Emulator already running');
+      this.startedEmulatorSerial = listAttachedEmulatorSerials()[0];
+      if (this.androidOptions.shutdownEmulatorOnTerminate === true) {
+        this.ownedEmulator = true;
+        this.registerProcessCleanup();
+      }
       return;
     }
 
@@ -644,11 +708,14 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
       detached: true,
       stdio: 'ignore',
     });
+    this.emulatorProcess = proc;
+    this.registerProcessCleanup();
     proc.unref();
 
     await this.waitForEmulatorBoot();
     this.ownedEmulator = true;
     this.startedEmulatorSerial = listAttachedEmulatorSerials()[0];
+    debug('Emulator ready serial=%s pid=%s', this.startedEmulatorSerial ?? 'unknown', String(proc.pid ?? 'unknown'));
   }
 
   private async isAppiumAlive(): Promise<boolean> {
@@ -687,6 +754,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
       stdio: 'ignore',
     });
     this.ownedAppium = true;
+    this.registerProcessCleanup();
 
     await this.waitForAppium();
   }
