@@ -694,8 +694,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   private async readAccountTotals(): Promise<PepperAccountTotals | undefined> {
     const savings = await this.ilsAmountAfterLabel('חסכונות', 1);
     const investments =
-      (await this.ilsAmountAfterLabel('תיק השקעות', 1)) ??
-      (await this.ilsAmountAfterLabel('תיק ההשקעות', 1));
+      (await this.ilsAmountAfterLabel('תיק השקעות', 1)) ?? (await this.ilsAmountAfterLabel('תיק ההשקעות', 1));
     const foreignCurrency = await this.foreignBalancesBroadScan();
 
     const totals: PepperAccountTotals = {};
