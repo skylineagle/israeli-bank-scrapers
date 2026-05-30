@@ -120,4 +120,4 @@ Override snapshot names with constructor options or env vars (see table below).
 
 ## Example scraper
 
-See [Pepper](./pepper/README.md) for a full implementation, local test harness, and UI probe tooling.
+See [Pepper](./pepper/README.md) for a full implementation and local test harness.

@@ -10,9 +10,9 @@ For emulator boot, Appium setup, RAM snapshots, and shared Android options, see
 
 | File                     | Responsibility                                                               |
 | ------------------------ | ---------------------------------------------------------------------------- |
-| `pepper.ts`              | Scraper: `login()`, `fetchData()`, and dashboard probe orchestration.        |
+| `pepper.ts`              | Scraper: `login()` and `fetchData()`.                                        |
 | `pepper-selectors.ts`    | Package name, phone country code, UI selectors, regexes, screen coordinates. |
-| `pepper-types.ts`        | `PepperCredentials`, `PepperAccountTotals`, `PepperDashboardProbeResult`.    |
+| `pepper-types.ts`        | `PepperCredentials`, `PepperAccountTotals`.                                    |
 | `pepper-parsing.ts`      | Pure text/amount/account/phone parsing (unit-tested, no Appium).             |
 | `pepper-parsing.test.ts` | Unit tests for the parsing module.                                           |
 | `pepper.test.ts`         | Integration tests (login + scrape) via Jest; see CONTRIBUTING.md.            |

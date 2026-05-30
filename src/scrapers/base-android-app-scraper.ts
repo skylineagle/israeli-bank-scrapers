@@ -11,7 +11,7 @@ import {
 import { resolveAndroidLauncherAppActivity } from '../helpers/android-launcher';
 import { registerAndroidProcessCleanup, unregisterAndroidProcessCleanup } from '../helpers/android-process-cleanup';
 import { getDebug } from '../helpers/debug';
-import { stripBidiAndTrim } from '../helpers/text';
+import { stripBidirectionalAndTrim } from '../helpers/text';
 import { sleep } from '../helpers/waiting';
 import { BaseScraper } from './base-scraper';
 import { type AndroidScraperOptions, type ScraperCredentials } from './interface';
@@ -880,7 +880,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   protected async readAccessibleText(element: AccessibleElement): Promise<string> {
     const chunks: string[] = [];
     const addChunk = (value: string): void => {
-      const cleaned = stripBidiAndTrim(value);
+      const cleaned = stripBidirectionalAndTrim(value);
       if (cleaned.length > 0 && cleaned.toLowerCase() !== 'null' && !chunks.includes(cleaned)) {
         chunks.push(cleaned);
       }
@@ -901,7 +901,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
         /* attribute not present on this element */
       }
     }
-    return stripBidiAndTrim(chunks.join(' '));
+    return stripBidirectionalAndTrim(chunks.join(' '));
   }
 
   /** Tap an absolute screen coordinate via `adb shell input tap` (for controls with no accessible selector). */

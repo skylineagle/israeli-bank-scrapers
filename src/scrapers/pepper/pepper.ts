@@ -1,6 +1,6 @@
 import { getDebug } from '../../helpers/debug';
 import { sleep, TimeoutError } from '../../helpers/waiting';
-import { stripBidiAndTrim } from '../../helpers/text';
+import { stripBidirectionalAndTrim } from '../../helpers/text';
 import { type CurrencyAmount, type TransactionsAccount } from '../../transactions';
 import { BaseAndroidAppScraper } from '../base-android-app-scraper';
 import { ScraperErrorTypes } from '../errors';
@@ -20,15 +20,11 @@ import {
   LOGIN_UI_WAIT_MS,
   PEPPER_ACCOUNT_LINE_REGEX,
   PEPPER_BALANCE_AMOUNT_STRIP_REGEX,
-  PEPPER_BALANCE_LABELS,
   PEPPER_BALANCE_SELECTORS,
   PEPPER_CONTINUE_SELECTORS,
   PEPPER_DASHED_ACCOUNT_TOKEN_REGEX,
   PEPPER_FOREIGN_CURRENCY_HINT_REGEX,
   PEPPER_FOREIGN_CURRENCY_NODE_SELECTOR,
-  PEPPER_FOREIGN_CURRENCY_PIVOT_SELECTORS,
-  PEPPER_FOREIGN_CURRENCY_SECTION_STOP_REGEX,
-  PEPPER_HERO_BALANCE_COMPOUND_SELECTORS,
   PEPPER_HOME_DASHBOARD_READY_SELECTORS,
   PEPPER_HOME_TAB_SELECTORS,
   PEPPER_LOGGED_IN_SELECTORS,
@@ -54,7 +50,7 @@ import {
   PEPPER_WELCOME_CONTINUE_SELECTORS,
   uiSelector,
 } from './pepper-selectors';
-import { type PepperAccountTotals, type PepperCredentials, type PepperDashboardProbeResult } from './pepper-types';
+import { type PepperAccountTotals, type PepperCredentials } from './pepper-types';
 
 const debug = getDebug('pepper');
 
@@ -70,9 +66,6 @@ type PepperUiElement = {
   parentElement: () => PepperUiElement;
   $$: (selector: string) => { getElements: () => Promise<PepperUiElement[]> };
 };
-
-/** A named, fault-tolerant strategy whose success path is logged for later pruning. */
-type ResolveStrategy<TResult> = { name: string; run: () => Promise<TResult | undefined> };
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -167,39 +160,6 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       .$$(selector)
       .getElements()
       .catch(() => [])) as unknown as PepperUiElement[];
-  }
-
-  private async childElements(parent: PepperUiElement, selector: string): Promise<PepperUiElement[]> {
-    return (await parent
-      .$$(selector)
-      .getElements()
-      .catch(() => [])) as unknown as PepperUiElement[];
-  }
-
-  /**
-   * Run named strategies in order, returning the first defined result and logging which one won.
-   * The `*.resolved` step log reveals the working path so the unused ones can be pruned later.
-   */
-  private async firstResolved<TResult>(
-    label: string,
-    strategies: readonly ResolveStrategy<TResult>[],
-  ): Promise<TResult | undefined> {
-    for (const strategy of strategies) {
-      try {
-        const value = await strategy.run();
-        if (value !== undefined) {
-          this.stepLog(`${label}.resolved`, { strategy: strategy.name });
-          return value;
-        }
-      } catch (error) {
-        this.stepLog(`${label}.strategy_failed`, {
-          strategy: strategy.name,
-          message: errorMessage(error).slice(0, 200),
-        });
-      }
-    }
-    this.stepLog(`${label}.unresolved`, {});
-    return undefined;
   }
 
   // ---------------------------------------------------------------------------
@@ -633,71 +593,8 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   }
 
   // ---------------------------------------------------------------------------
-  // Dashboard reads
+  // Data reads
   // ---------------------------------------------------------------------------
-
-  private async ilsAmountFromElement(element: PepperUiElement): Promise<number | undefined> {
-    const text = await this.readAccessibleText(element);
-    const parsed = parseCurrencyAmountSnippet(text);
-    if (parsed?.currency === 'ILS' && Number.isFinite(parsed.amount)) {
-      return parsed.amount;
-    }
-    return firstIlsAmountFromCompoundText(text);
-  }
-
-  private async ilsAmountFromChildren(parent: PepperUiElement, limit = 24): Promise<number | undefined> {
-    const children = await this.childElements(parent, './/android.widget.TextView | .//android.view.View');
-    for (const child of children.slice(0, limit)) {
-      const amount = await this.ilsAmountFromElement(child);
-      if (amount !== undefined) {
-        return amount;
-      }
-    }
-    return undefined;
-  }
-
-  private async ilsAmountNearLabel(
-    label: string,
-    options: { scanChildren: boolean; maxDepth: number },
-  ): Promise<number | undefined> {
-    const selector = `//*[contains(@text,"${label}") or contains(@content-desc,"${label}")]`;
-    let current = this.element(selector);
-    if (!(await current.isExisting().catch(() => false))) {
-      return undefined;
-    }
-
-    for (let depth = 0; depth < options.maxDepth; depth += 1) {
-      const direct = await this.ilsAmountFromElement(current);
-      if (direct !== undefined) {
-        return direct;
-      }
-      if (options.scanChildren) {
-        const fromChild = await this.ilsAmountFromChildren(current);
-        if (fromChild !== undefined) {
-          return fromChild;
-        }
-      }
-      const parent = current.parentElement();
-      if (!(await parent.isExisting().catch(() => false))) {
-        return undefined;
-      }
-      current = parent;
-    }
-    return undefined;
-  }
-
-  private async ilsAmountNearAnyLabel(
-    labels: readonly string[],
-    options: { scanChildren: boolean; maxDepth: number },
-  ): Promise<number | undefined> {
-    for (const label of labels) {
-      const amount = await this.ilsAmountNearLabel(label, options);
-      if (amount !== undefined) {
-        return amount;
-      }
-    }
-    return undefined;
-  }
 
   private async ilsAmountAfterLabel(label: string, nth: number): Promise<number | undefined> {
     const labelPredicate = `contains(@text,"${label}") or contains(@content-desc,"${label}")`;
@@ -738,30 +635,10 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     return candidates[0].amount;
   }
 
-  private async ilsAmountFromHeroCompound(): Promise<number | undefined> {
-    for (const selector of PEPPER_HERO_BALANCE_COMPOUND_SELECTORS) {
-      try {
-        const element = this.element(selector);
-        await element.waitForDisplayed({ timeout: 5_000 });
-        const amount = firstIlsAmountFromCompoundText(await this.readAccessibleText(element));
-        if (amount !== undefined) {
-          return amount;
-        }
-      } catch {
-        continue;
-      }
-    }
-    return undefined;
-  }
-
   private async readBalance(): Promise<number | undefined> {
-    // shekelNodesScan is the path confirmed by step logs; the other strategies remain available
-    // for diagnosis via probeDashboard(). The selector fallback only runs if the scan finds nothing.
-    const resolved = await this.firstResolved<number>('pepper.balance', [
-      { name: 'shekelNodesScan', run: () => this.ilsAmountFromShekelNodes() },
-    ]);
-    if (resolved !== undefined) {
-      return resolved;
+    const fromShekelScan = await this.ilsAmountFromShekelNodes();
+    if (fromShekelScan !== undefined) {
+      return fromShekelScan;
     }
     return this.readBalanceFromSelectorsFallback();
   }
@@ -783,69 +660,6 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       return numeric;
     }
     throw new Error('Could not parse Pepper balance from UI');
-  }
-
-  private async collectForeignByWalkingAncestors(
-    element: PepperUiElement,
-    gathered: CurrencyAmount[],
-    remainingDepth = 5,
-  ): Promise<void> {
-    if (remainingDepth <= 0 || !(await element.isExisting().catch(() => false))) {
-      return;
-    }
-    gathered.push(...extractForeignCurrencyAmountsFromText(await this.readAccessibleText(element)));
-    const parent = element.parentElement();
-    if (!(await parent.isExisting().catch(() => false))) {
-      return;
-    }
-    await this.collectForeignByWalkingAncestors(parent, gathered, remainingDepth - 1);
-  }
-
-  private async collectForeignFromFollowingTextViews(
-    anchor: PepperUiElement,
-    gathered: CurrencyAmount[],
-    limit = 28,
-  ): Promise<void> {
-    const nodes = await this.childElements(anchor, 'xpath=following::android.widget.TextView');
-    for (const node of nodes.slice(0, limit)) {
-      const text = await this.readAccessibleText(node);
-      if (!text) {
-        continue;
-      }
-      if (PEPPER_FOREIGN_CURRENCY_SECTION_STOP_REGEX.exec(stripBidiAndTrim(text))) {
-        break;
-      }
-      gathered.push(...extractForeignCurrencyAmountsFromText(text));
-    }
-  }
-
-  private async collectForeignFromDescendants(
-    anchor: PepperUiElement,
-    gathered: CurrencyAmount[],
-    limit = 20,
-  ): Promise<void> {
-    const nodes = await this.childElements(anchor, './/android.widget.TextView | .//android.view.View');
-    for (const node of nodes.slice(0, limit)) {
-      gathered.push(...extractForeignCurrencyAmountsFromText(await this.readAccessibleText(node)));
-    }
-  }
-
-  private async foreignBalancesNearPivot(): Promise<CurrencyAmount[] | undefined> {
-    for (const pivotSelector of PEPPER_FOREIGN_CURRENCY_PIVOT_SELECTORS) {
-      const anchor = this.element(pivotSelector);
-      if (!(await anchor.isExisting().catch(() => false))) {
-        continue;
-      }
-      const gathered: CurrencyAmount[] = [];
-      await this.collectForeignByWalkingAncestors(anchor, gathered);
-      await this.collectForeignFromFollowingTextViews(anchor, gathered);
-      await this.collectForeignFromDescendants(anchor, gathered);
-      const deduped = dedupeCurrencyAmounts(gathered);
-      if (deduped.length > 0) {
-        return deduped;
-      }
-    }
-    return undefined;
   }
 
   /**
@@ -878,21 +692,11 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   }
 
   private async readAccountTotals(): Promise<PepperAccountTotals | undefined> {
-    // Strategies pruned to the paths confirmed by step logs. The expensive ancestor walk
-    // (savings/investments) and the pivot scan (foreign currency) failed in practice and now run
-    // only inside probeDashboard() for diagnosis. The cheap `afterLabel` variants are kept.
-    const savings = await this.firstResolved<number>('pepper.savings', [
-      { name: 'afterLabel', run: () => this.ilsAmountAfterLabel('חסכונות', 1) },
-    ]);
-
-    const investments = await this.firstResolved<number>('pepper.investments', [
-      { name: 'afterLabel:תיק השקעות', run: () => this.ilsAmountAfterLabel('תיק השקעות', 1) },
-      { name: 'afterLabel:תיק ההשקעות', run: () => this.ilsAmountAfterLabel('תיק ההשקעות', 1) },
-    ]);
-
-    const foreignCurrency = await this.firstResolved<CurrencyAmount[]>('pepper.foreignCurrency', [
-      { name: 'currencyNodesScan', run: () => this.foreignBalancesBroadScan() },
-    ]);
+    const savings = await this.ilsAmountAfterLabel('חסכונות', 1);
+    const investments =
+      (await this.ilsAmountAfterLabel('תיק השקעות', 1)) ??
+      (await this.ilsAmountAfterLabel('תיק ההשקעות', 1));
+    const foreignCurrency = await this.foreignBalancesBroadScan();
 
     const totals: PepperAccountTotals = {};
     if (savings !== undefined) {
@@ -956,7 +760,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     if (!clipboard) {
       return undefined;
     }
-    return this.accountNumberCandidates(stripBidiAndTrim(clipboard)).find(isLikelyPepperAccountToken);
+    return this.accountNumberCandidates(stripBidirectionalAndTrim(clipboard)).find(isLikelyPepperAccountToken);
   }
 
   // ---------------------------------------------------------------------------
@@ -991,114 +795,6 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       debug('readAccountNumber failed: %s', errorMessage(error));
     }
     return 'unknown';
-  }
-
-  // ---------------------------------------------------------------------------
-  // Diagnostics (internal): discover which dashboard-reading path works
-  // ---------------------------------------------------------------------------
-
-  async runProbeSession(credentials: PepperCredentials): Promise<PepperDashboardProbeResult> {
-    let ok = false;
-    try {
-      await this.initialize();
-      const loginResult = await this.login(credentials);
-      if (!loginResult.success) {
-        throw new Error(loginResult.errorMessage ?? 'Pepper login failed');
-      }
-      const probe = await this.probeDashboard();
-      ok = true;
-      return probe;
-    } finally {
-      await this.terminate(ok).catch(error => {
-        debug('runProbeSession terminate failed: %s', errorMessage(error));
-      });
-    }
-  }
-
-  async probeDashboard(): Promise<PepperDashboardProbeResult> {
-    await this.ensureHomeDashboard();
-
-    const homeMarkers = await this.probeHomeMarkers();
-    const { shekelMatchingNodeCount, topShekelSamples } = await this.probeShekelNodes();
-    const balanceAttempts = await this.probeBalanceAttempts();
-
-    const pivoted = await this.foreignBalancesNearPivot().catch(() => undefined);
-    const broad = await this.foreignBalancesBroadScan();
-
-    return {
-      homeMarkers,
-      shekelMatchingNodeCount,
-      topShekelSamples: topShekelSamples.slice(0, 18),
-      balanceAttempts,
-      foreignPivotScanCount: pivoted?.length ?? 0,
-      foreignBroadScanCount: broad?.length ?? 0,
-      foreignBroadScanPreview: broad?.slice(0, 8).map(amount => `${amount.currency}:${amount.amount}`),
-    };
-  }
-
-  private async probeHomeMarkers(): Promise<PepperDashboardProbeResult['homeMarkers']> {
-    const markers = [
-      { name: 'heroBalanceLabel', selector: uiSelector('textContains("זאת היתרה")') },
-      { name: 'accountTextMarker', selector: '//*[contains(@text,"חשבון") or contains(@content-desc,"חשבון")]' },
-    ];
-
-    const results: PepperDashboardProbeResult['homeMarkers'] = [];
-    for (const { name, selector } of markers) {
-      try {
-        const element = this.element(selector);
-        const exists = await element.isExisting();
-        const displayed = exists ? await element.isDisplayed().catch(() => false) : false;
-        const accessibleTextPreview = displayed ? (await this.readAccessibleText(element)).slice(0, 240) : '';
-        results.push({ name, exists, displayed, accessibleTextPreview });
-      } catch {
-        results.push({ name, exists: false, displayed: false, accessibleTextPreview: '' });
-      }
-    }
-    return results;
-  }
-
-  private async probeShekelNodes(): Promise<
-    Pick<PepperDashboardProbeResult, 'shekelMatchingNodeCount' | 'topShekelSamples'>
-  > {
-    const elements = await this.queryElements(PEPPER_SHEKEL_NODE_SELECTOR);
-    const topShekelSamples: PepperDashboardProbeResult['topShekelSamples'] = [];
-    for (const element of elements) {
-      try {
-        if (!(await element.isDisplayed())) {
-          continue;
-        }
-        const location = await element.getLocation().catch(() => ({ x: 0, y: 0 }));
-        const accessibleText = (await this.readAccessibleText(element)).slice(0, 200);
-        topShekelSamples.push({ y: location.y, accessibleText });
-      } catch {
-        continue;
-      }
-    }
-    topShekelSamples.sort((first, second) => first.y - second.y);
-    return { shekelMatchingNodeCount: elements.length, topShekelSamples };
-  }
-
-  private async probeBalanceAttempts(): Promise<PepperDashboardProbeResult['balanceAttempts']> {
-    const paths: { path: string; run: () => Promise<number | undefined> }[] = [
-      {
-        path: 'walkAncestorsFromLabels',
-        run: () => this.ilsAmountNearAnyLabel(PEPPER_BALANCE_LABELS, { scanChildren: false, maxDepth: 8 }),
-      },
-      { path: 'ilsAfterHeroLabel', run: () => this.ilsAmountAfterLabel('זאת היתרה', 1) },
-      { path: 'heroCompound', run: () => this.ilsAmountFromHeroCompound() },
-      { path: 'shekelNodesScan', run: () => this.ilsAmountFromShekelNodes() },
-    ];
-
-    const attempts: PepperDashboardProbeResult['balanceAttempts'] = [];
-    for (const { path, run } of paths) {
-      try {
-        const value = await run();
-        attempts.push(value !== undefined ? { path, value } : { path, error: 'undefined' });
-      } catch (error) {
-        attempts.push({ path, error: errorMessage(error) });
-      }
-    }
-    return attempts;
   }
 }
 

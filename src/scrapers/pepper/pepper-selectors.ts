@@ -78,12 +78,6 @@ export const PEPPER_BALANCE_SELECTORS: readonly string[] = [
   '//*[@clickable="true"][contains(@text,"זאת היתרה")]',
 ];
 
-export const PEPPER_HERO_BALANCE_COMPOUND_SELECTORS: readonly string[] = [
-  '//android.widget.Button[contains(@text,"זאת היתרה")]',
-  '//*[@clickable="true"][contains(@text,"זאת היתרה")]',
-  uiSelector('textContains("זאת היתרה").clickable(true)'),
-];
-
 export const PEPPER_PHONE_SELECTORS_STRICT: readonly string[] = [
   resourceIdSelectors.phoneInput,
   uiSelector(`resourceId("${PEPPER_PACKAGE_NAME}:id/etPhoneNumber")`),
@@ -254,26 +248,6 @@ export const PEPPER_SHEKEL_PREDICATE = "contains(@text,'₪') or contains(@conte
 
 /** Any node whose text or content-desc mentions the shekel sign. */
 export const PEPPER_SHEKEL_NODE_SELECTOR = `//*[${PEPPER_SHEKEL_PREDICATE}]`;
-
-/** Hebrew labels that sit next to the hero balance on the dashboard, in priority order. */
-export const PEPPER_BALANCE_LABELS: readonly string[] = ['זאת היתרה', 'יתרה שלך', 'יתרה'];
-
-export const PEPPER_SAVINGS_LABELS: readonly string[] = ['חסכונות'];
-
-export const PEPPER_INVESTMENTS_LABELS: readonly string[] = ['תיק השקעות', 'תיק ההשקעות'];
-
-export const PEPPER_FOREIGN_CURRENCY_PIVOT_SELECTORS: readonly string[] = [
-  '//*[contains(@text,"מט\u05f4ח") or contains(@content-desc,"מט\u05f4ח")]',
-  "//*[contains(@text,'מט\"ח') or contains(@content-desc,'מט\"ח')]",
-  '//*[contains(@text,"מטח") or contains(@content-desc,"מטח")]',
-  uiSelector('textContains("מט\u05f4ח")'),
-  uiSelector('textContains("מטח")'),
-  uiSelector('descriptionContains("מט\u05f4ח")'),
-  uiSelector('descriptionContains("מטח")'),
-];
-
-/** Labels that mark the end of the foreign-currency section when scanning following siblings. */
-export const PEPPER_FOREIGN_CURRENCY_SECTION_STOP_REGEX = /כרטיסי אשראי|תנועות אחרונות|פעולות|^בית$/;
 
 /** Hint that a node likely carries a foreign-currency amount, used to filter the broad dashboard scan. */
 export const PEPPER_FOREIGN_CURRENCY_HINT_REGEX =

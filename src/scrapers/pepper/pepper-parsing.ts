@@ -1,4 +1,4 @@
-import { stripBidiAndTrim } from '../../helpers/text';
+import { stripBidirectionalAndTrim } from '../../helpers/text';
 import { type CurrencyAmount } from '../../transactions';
 import { ISRAELI_PHONE_COUNTRY_CODE } from './pepper-selectors';
 import { type SymbolCurrency } from './pepper-types';
@@ -42,7 +42,7 @@ function forEachMatch(regex: RegExp, text: string, onMatch: (match: RegExpExecAr
 
 /** Parse the first currency amount from a text snippet, preferring symbols (ILS first) over ISO codes. */
 export function parseCurrencyAmountSnippet(raw: string): CurrencyAmount | undefined {
-  const text = stripBidiAndTrim(raw);
+  const text = stripBidirectionalAndTrim(raw);
   if (!text) {
     return undefined;
   }
@@ -123,7 +123,7 @@ export function dedupeCurrencyAmounts(amounts: readonly CurrencyAmount[]): Curre
 
 /** Extract every non-ILS currency amount found in the text, deduplicated. */
 export function extractForeignCurrencyAmountsFromText(raw: string): CurrencyAmount[] {
-  const text = stripBidiAndTrim(raw);
+  const text = stripBidirectionalAndTrim(raw);
   if (!text) {
     return [];
   }
@@ -133,7 +133,7 @@ export function extractForeignCurrencyAmountsFromText(raw: string): CurrencyAmou
 
 /** Return the first ILS amount from compound text (leading symbol preferred over trailing). */
 export function firstIlsAmountFromCompoundText(raw: string): number | undefined {
-  const text = stripBidiAndTrim(raw);
+  const text = stripBidirectionalAndTrim(raw);
   const leading = text.match(leadingAmountRegex(ILS_SYMBOL_PATTERN));
   if (leading) {
     const amount = parseAmountFragment(leading[1]);
@@ -151,17 +151,17 @@ const LABELED_ACCOUNT_REGEX = /חשבון\s*[:\s]*([\d\s\-*•\u2022]+)/u;
 const DASHED_ACCOUNT_REGEX = /^\d{1,3}-\d{1,3}-\d{3,}$/;
 
 export function normalizePepperAccountNumber(raw: string): string {
-  const text = stripBidiAndTrim(raw);
+  const text = stripBidirectionalAndTrim(raw);
   const labeled = text.match(LABELED_ACCOUNT_REGEX);
   if (labeled) {
-    const chunk = stripBidiAndTrim(labeled[1]).replace(/\s+/g, '').replace(/•/g, '*');
+    const chunk = stripBidirectionalAndTrim(labeled[1]).replace(/\s+/g, '').replace(/•/g, '*');
     if (DASHED_ACCOUNT_REGEX.test(chunk)) {
       return chunk;
     }
     const digitsOnly = chunk.replace(/\D/g, '');
     return digitsOnly.length >= 4 ? digitsOnly : chunk;
   }
-  return stripBidiAndTrim(text.replace(/^חשבון\s*/u, ''));
+  return stripBidirectionalAndTrim(text.replace(/^חשבון\s*/u, ''));
 }
 
 const COMPACT_DIGITS_ACCOUNT_REGEX = /^\d{4,14}$/;
