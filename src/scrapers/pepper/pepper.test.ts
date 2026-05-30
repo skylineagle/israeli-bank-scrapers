@@ -6,6 +6,9 @@ import PepperScraper from './pepper';
 
 const COMPANY_ID = 'pepper';
 const testsConfig = getTestsConfig();
+const PEPPER_TEST_TIMEOUT_MS = 600_000;
+
+extendAsyncTimeout(PEPPER_TEST_TIMEOUT_MS);
 
 const readStdin = (prompt: string): Promise<string> => {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -32,10 +35,6 @@ const pepperScraperOptions = () => ({
 });
 
 describe('Pepper scraper', () => {
-  beforeAll(() => {
-    extendAsyncTimeout(360_000);
-  });
-
   test('should expose login fields in scrapers constant', () => {
     expect(SCRAPERS.pepper).toBeDefined();
     expect(SCRAPERS.pepper.loginFields).toContain('phoneNumber');
@@ -54,6 +53,7 @@ describe('Pepper scraper', () => {
       expect(result.success).toBeFalsy();
       expect(result.errorType).toBe(LoginResults.InvalidPassword);
     },
+    PEPPER_TEST_TIMEOUT_MS,
   );
 
   maybeTestCompanyAPI(COMPANY_ID)('should scrape transactions"', async () => {
@@ -68,5 +68,5 @@ describe('Pepper scraper', () => {
     expect(result.success).toBeTruthy();
 
     exportTransactions(COMPANY_ID, result.accounts || []);
-  });
+  }, PEPPER_TEST_TIMEOUT_MS);
 });

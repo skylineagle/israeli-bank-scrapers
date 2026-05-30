@@ -67,6 +67,8 @@ Uncomment `pepper` credentials in `src/tests/.tests-config.js` (from `.tests-con
 npm test -- pepper.test.ts
 ```
 
+`npm test` sets `NODE_OPTIONS=--experimental-vm-modules` so WebDriverIO can load under Jest (required for Appium sessions).
+
 When SMS OTP is required, enter the code at the prompt or set `PEPPER_OTP`. Optional: `PEPPER_AVD=Pixel_9_API_35`
 to pick a specific AVD.
 

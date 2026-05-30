@@ -14,7 +14,7 @@ import {
 import { resolveAndroidLauncherAppActivity } from '../helpers/android-launcher';
 import { stripBidiAndTrim } from '../helpers/text';
 import { BaseScraper } from './base-scraper';
-import { type ScraperCredentials, type ScraperOptions } from './interface';
+import { type AndroidScraperOptions, type ScraperCredentials } from './interface';
 import { sleep } from '../helpers/waiting';
 
 const debug = getDebug('android-app-scraper');
@@ -36,16 +36,6 @@ const ZERO_CHARACTER_CODE = '0'.charCodeAt(0);
 type AccessibleElement = {
   getText: () => Promise<string>;
   getAttribute: (name: string) => Promise<string | null>;
-};
-
-type AndroidScraperOptions = ScraperOptions & {
-  avdName?: string;
-  appiumPort?: number;
-  snapshotName?: string;
-  baselineSnapshotName?: string;
-  sessionSnapshotName?: string;
-  persistEmulatorSession?: boolean;
-  forceBaselineSnapshot?: boolean;
 };
 
 type AppiumCapabilities = {
@@ -87,7 +77,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   }
 
   private get androidOptions(): AndroidScraperOptions {
-    return this.options as AndroidScraperOptions;
+    return this.options;
   }
 
   private get resolvedAppiumPort(): number {
