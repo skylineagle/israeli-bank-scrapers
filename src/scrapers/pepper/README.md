@@ -42,9 +42,9 @@ after loading `scraper-baseline`, or when `ANDROID_FORCE_BASELINE=1` resets the 
 ## Running
 
 ```ts
-import { CompanyTypes, PepperScraper } from 'israeli-bank-scrapers';
+import { CompanyTypes, createScraper } from 'israeli-bank-scrapers';
 
-const scraper = new PepperScraper({
+const scraper = createScraper({
   companyId: CompanyTypes.pepper,
   startDate: new Date('2025-01-01'),
   avdName: 'Pixel_9_API_35', // optional; defaults to the first AVD

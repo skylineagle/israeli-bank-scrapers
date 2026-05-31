@@ -656,10 +656,6 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     if (this.isEmulatorRunning()) {
       debug('Emulator already running');
       this.startedEmulatorSerial = listAttachedEmulatorSerials()[0];
-      if (this.androidOptions.shutdownEmulatorOnTerminate === true) {
-        this.ownedEmulator = true;
-        this.registerProcessCleanup();
-      }
       return;
     }
 
