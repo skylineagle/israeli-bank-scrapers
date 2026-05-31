@@ -145,9 +145,6 @@ export const PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS: readonly string[] = [
   uiSelector('classNameContains("FloatingActionButton").clickable(true)'),
   uiSelector('resourceIdMatches("(?i).*fab.*").clickable(true)'),
   uiSelector('resourceIdMatches("(?i).*submit.*").clickable(true)'),
-  uiSelector('resourceIdMatches("(?i).*continue.*").clickable(true)'),
-  '//*[@text="המשך"]',
-  uiSelector('textContains("המשך")'),
 ];
 
 export const PEPPER_PASSWORD_SELECTORS: readonly string[] = [
@@ -158,6 +155,26 @@ export const PEPPER_PASSWORD_SELECTORS: readonly string[] = [
   "//android.widget.EditText[contains(@resource-id,'Password')]",
   uiSelector('resourceIdMatches("(?i).*password.*").className("android.widget.EditText")'),
   '//android.widget.EditText[@password="true"]',
+];
+
+export const PEPPER_INVALID_CREDENTIALS_MESSAGE_SELECTORS: readonly string[] = [
+  uiSelector('textContains("אחד או יותר מהפרטים לא נכונים")'),
+  uiSelector('descriptionContains("אחד או יותר מהפרטים לא נכונים")'),
+  '//*[contains(@text,"אחד או יותר מהפרטים לא נכונים")]',
+  '//*[contains(@content-desc,"אחד או יותר מהפרטים לא נכונים")]',
+];
+
+export const PEPPER_INVALID_CREDENTIALS_BACK_SELECTORS: readonly string[] = [
+  '//*[@text="חזרה להתחברות"]',
+  "//android.widget.Button[contains(@text,'חזרה להתחברות')]",
+  uiSelector('text("חזרה להתחברות")'),
+  uiSelector('textContains("חזרה להתחברות")'),
+  uiSelector('descriptionContains("חזרה להתחברות")'),
+];
+
+export const PEPPER_INVALID_CREDENTIALS_SCREEN_SELECTORS: readonly string[] = [
+  ...PEPPER_INVALID_CREDENTIALS_MESSAGE_SELECTORS,
+  ...PEPPER_INVALID_CREDENTIALS_BACK_SELECTORS,
 ];
 
 /**

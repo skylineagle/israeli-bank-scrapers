@@ -27,6 +27,7 @@ import {
   PEPPER_FOREIGN_CURRENCY_NODE_SELECTOR,
   PEPPER_HOME_DASHBOARD_READY_SELECTORS,
   PEPPER_HOME_TAB_SELECTORS,
+  PEPPER_INVALID_CREDENTIALS_SCREEN_SELECTORS,
   PEPPER_LOGGED_IN_SELECTORS,
   PEPPER_LOGIN_SUBMIT_TEXT_SELECTORS,
   PEPPER_NOTIFICATION_POPUP_DISMISS_SELECTORS,
@@ -119,11 +120,19 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     await this.ensureForeground();
     await this.submitCredentialsIfNeeded();
 
-    debug('Waiting for home or optional SMS/code step');
-    const afterPassword = await this.pollLoggedInOrOtp(48_000);
+    debug('Waiting for home, invalid credentials, or optional SMS/code step');
+    const afterPassword = await this.pollLoginResult(4_000);
     if (afterPassword === 'logged_in') {
       debug('Logged in without SMS/code verification step');
       return { success: true };
+    }
+    if (afterPassword === 'invalid_creds') {
+      this.stepLog('pepper.login.invalid_credentials', {});
+      return {
+        success: false,
+        errorType: ScraperErrorTypes.InvalidPassword,
+        errorMessage: 'Login failed with INVALID_PASSWORD error',
+      };
     }
 
     return this.completeOtpStep(credentials);
@@ -400,12 +409,17 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     }
   }
 
-  private async pollLoggedInOrOtp(totalMs: number): Promise<'logged_in' | 'otp'> {
+  private async isInvalidCredentialsScreen(): Promise<boolean> {
+    return this.isAnyVisible(PEPPER_INVALID_CREDENTIALS_SCREEN_SELECTORS, 600);
+  }
+
+  private async pollLoginResult(totalMs: number): Promise<'logged_in' | 'otp' | 'invalid_creds'> {
     const deadline = Date.now() + totalMs;
     let blankCycles = 0;
     while (Date.now() < deadline) {
-      // Check OTP before the long logged-in selector list: it appears within milliseconds of the
-      // server validating credentials, and checking it first saves time per poll iteration.
+      if (await this.isInvalidCredentialsScreen()) {
+        return 'invalid_creds';
+      }
       if (await this.isOtpPhaseVisible()) {
         return 'otp';
       }
@@ -430,14 +444,20 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       }
       await sleep(420);
     }
-    throw new TimeoutError(`Timed out after ${totalMs}ms waiting for Pepper home screen or SMS/code verification UI`);
+    throw new TimeoutError(
+      `Timed out after ${totalMs}ms waiting for Pepper home screen, invalid-credentials screen, or SMS/code verification UI`,
+    );
   }
 
   private async tapPostCredentialsSubmitIfPresent(): Promise<void> {
     if (!(await this.isAnyVisible(PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS, 2_800))) {
       return;
     }
-    await this.tapAny(PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS, 14_000);
+    try {
+      await this.tapAny(PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS, 14_000);
+    } catch (error) {
+      debug('Post-credentials submit tap skipped in poll loop: %s', errorMessage(error).slice(0, 160));
+    }
   }
 
   private async completeOtpStep(credentials: PepperCredentials): Promise<ScraperLoginResult> {
