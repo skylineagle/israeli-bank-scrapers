@@ -205,15 +205,14 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   // ---------------------------------------------------------------------------
 
   /**
-   * After a session-snapshot load the app may reopen on the profile or another sub-screen.
-   * Return to the home dashboard before login checks or before saving a new snapshot.
+   * After a session-snapshot load Pepper is force-stopped before the snapshot is saved, so the app
+   * relaunches on a clean start. Handle the transient login flash, notification popups, and the
+   * occasional profile screen (coordinate back only — no multi-step back/home loop).
    */
   private async ensureSessionUiReady(): Promise<void> {
     await this.dismissNotificationPopupIfPresent();
 
     if (await this.isLoginScreen()) {
-      // After a force-stop relaunch Pepper briefly shows the login screen before reading its
-      // auth token and navigating home. Wait to distinguish a transient state from a real logout.
       const navigatedHome = await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 8_000);
       if (!navigatedHome) {
         return;
@@ -224,51 +223,8 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       return;
     }
 
-    // The profile back button has no accessible label, so tap it by coordinate before entering
-    // the slower recovery loop (saves a long sequence of fruitless back/home-tab attempts).
     if (await this.isAnyVisible(PEPPER_PROFILE_SCREEN_SELECTORS, 1_500)) {
       this.tapProfileBackButton();
-      if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 3_000)) {
-        return;
-      }
-    }
-
-    this.stepLog('pepper.session.restore_ui', {});
-    debug('Restoring Pepper UI to home (session snapshot may have opened off-dashboard)');
-    await this.recoverHomeDashboard();
-  }
-
-  private async recoverHomeDashboard(): Promise<void> {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 1_400)) {
-        return;
-      }
-      if (await this.isLoginScreen()) {
-        return;
-      }
-      if (await this.isAnyVisible(PEPPER_PROFILE_SCREEN_SELECTORS, 800)) {
-        this.tapProfileBackButton();
-        continue;
-      }
-      if (await this.isAnyVisible(PEPPER_HOME_TAB_SELECTORS, 1_000)) {
-        try {
-          await this.tapAny(PEPPER_HOME_TAB_SELECTORS, 6_000);
-          if (await this.isAnyVisible(PEPPER_HOME_DASHBOARD_READY_SELECTORS, 6_000)) {
-            return;
-          }
-          // Home tab was tapped — pressing Back would undo it, so re-check on the next pass.
-          continue;
-        } catch {
-          /* fall through to Back navigation */
-        }
-      }
-      await this.pressAndroidBack();
-    }
-
-    try {
-      await this.ensureHomeDashboard();
-    } catch (error) {
-      debug('ensureHomeDashboard after session UI restore failed: %s', errorMessage(error));
     }
   }
 

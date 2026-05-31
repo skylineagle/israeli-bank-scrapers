@@ -57,7 +57,7 @@ describe('Pepper scraper', () => {
   );
 
   maybeTestCompanyAPI(COMPANY_ID)(
-    'should scrape transactions"',
+    'should scrape"',
     async () => {
       const scraper = new PepperScraper(pepperScraperOptions());
       const result = await scraper.scrape({
