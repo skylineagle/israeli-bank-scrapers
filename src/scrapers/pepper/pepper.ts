@@ -162,9 +162,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       }
       await sleep(200);
     }
-    throw new Error(
-      'Neither the "כניסה לחשבון שלי" welcome button nor the phone login field appeared in time',
-    );
+    throw new Error('Neither the "כניסה לחשבון שלי" welcome button nor the phone login field appeared in time');
   }
 
   private async waitForLoginOutcome(timeoutMs: number): Promise<LoginOutcome> {
@@ -308,7 +306,10 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
   }
 
   private async queryElements(selector: string): Promise<PepperUiElement[]> {
-    return (await this.driver.$$(selector).getElements().catch(() => [])) as unknown as PepperUiElement[];
+    return (await this.driver
+      .$$(selector)
+      .getElements()
+      .catch(() => [])) as unknown as PepperUiElement[];
   }
 
   private async ilsAmountAfterLabel(label: string, nth: number): Promise<number | undefined> {

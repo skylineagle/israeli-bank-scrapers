@@ -92,7 +92,8 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     await this.ensureEmulatorRunning();
     await this.ensureAppiumRunning();
 
-    this.launcherActivity = this.launcherActivityExplicit() ?? (await resolveAndroidLauncherAppActivity(this.appPackage));
+    this.launcherActivity =
+      this.launcherActivityExplicit() ?? (await resolveAndroidLauncherAppActivity(this.appPackage));
     debug('Using appPackage=%s appActivity=%s', this.appPackage, this.launcherActivity);
 
     const capabilities: AppiumCapabilities = {
@@ -175,7 +176,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   }
 
   /** Poll `isDisplayed()` across selectors until one matches or the budget expires. */
-  protected async waitForFirst(selectors: readonly string[], timeoutMs = DEFAULT_WAIT_MS): Promise<ChainablePromiseElement> {
+  protected async waitForFirst(
+    selectors: readonly string[],
+    timeoutMs = DEFAULT_WAIT_MS,
+  ): Promise<ChainablePromiseElement> {
     this.stepLog('waitForFirst.start', { selectorCount: selectors.length, timeoutMs });
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -210,7 +214,11 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     await el.setValue(value);
   }
 
-  protected async typeIntoFirst(selectors: readonly string[], value: string, timeoutMs = DEFAULT_WAIT_MS): Promise<void> {
+  protected async typeIntoFirst(
+    selectors: readonly string[],
+    value: string,
+    timeoutMs = DEFAULT_WAIT_MS,
+  ): Promise<void> {
     this.stepLog('typeIntoFirst.start', { selectorCount: selectors.length, valueLength: value.length, timeoutMs });
     const el = await this.waitForFirst(selectors, timeoutMs);
     await el.click();
@@ -221,7 +229,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
 
   /** Quick visibility check; optional short poll when timeoutMs > 0. */
   protected async isDisplayed(selector: string): Promise<boolean> {
-    return this.driver.$(selector).isDisplayed().catch(() => false);
+    return this.driver
+      .$(selector)
+      .isDisplayed()
+      .catch(() => false);
   }
 
   protected async isAnyDisplayed(selectors: readonly string[], timeoutMs = 0): Promise<boolean> {
@@ -237,7 +248,7 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
       }
       await sleep(POLL_MS);
     } while (Date.now() < deadline);
-    
+
     return false;
   }
 
@@ -354,10 +365,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     debug('Activating %s (current=%s)', this.appPackage, current || '(unknown)');
     await this.driver.execute('mobile: activateApp', { appId: this.appPackage });
 
-    const focused = await this.waitForCondition(
-      async () => (await this.readCurrentPackage()) === this.appPackage,
-      { timeoutMs: 8_000, intervalMs: 300 },
-    );
+    const focused = await this.waitForCondition(async () => (await this.readCurrentPackage()) === this.appPackage, {
+      timeoutMs: 8_000,
+      intervalMs: 300,
+    });
     if (!focused) {
       throw new Error(`Could not bring ${this.appPackage} to foreground after activateApp`);
     }

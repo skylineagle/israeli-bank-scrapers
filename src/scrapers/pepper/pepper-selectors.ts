@@ -13,7 +13,6 @@ const resourceIdSelectors = {
   transactionsTab: `//android.widget.TextView[@resource-id="${PEPPER_PACKAGE_NAME}:id/tvTransactions"]`,
 } as const;
 
-
 export const PEPPER_HOME_DASHBOARD_READY_SELECTORS: readonly string[] = [
   '//android.widget.Button[contains(@text,"זאת היתרה")]',
   '//*[@clickable="true"][contains(@text,"זאת היתרה")]',
@@ -33,7 +32,6 @@ export const PEPPER_PROFILE_SCREEN_SELECTORS: readonly string[] = [
   '//*[contains(@text,"העתקת") or contains(@content-desc,"העתקת")]',
   '//*[contains(@text,"מספר חשבון") or contains(@content-desc,"מספר חשבון")]',
 ];
-
 
 export const PEPPER_BALANCE_SELECTORS: readonly string[] = [
   "//*[contains(@resource-id,'Balance')]",
@@ -62,8 +60,6 @@ export const PEPPER_PHONE_SELECTORS_STRICT: readonly string[] = [
   uiSelector('resourceIdMatches("(?i).*phone.*").className("android.widget.EditText")'),
 ];
 
-
-
 /** First-launch marketing screen — tap to reach the phone/password login form. */
 export const PEPPER_WELCOME_CONTINUE_SELECTORS: readonly string[] = [
   '//*[@text="כניסה לחשבון שלי"]',
@@ -84,8 +80,6 @@ export const PEPPER_WELCOME_CONTINUE_SELECTORS: readonly string[] = [
   "//android.widget.Button[contains(@resource-id,'continue')]",
   "//android.widget.Button[contains(@resource-id,'start')]",
 ];
-
- 
 
 export const PEPPER_PASSWORD_SELECTORS: readonly string[] = [
   uiSelector(`resourceId("${PEPPER_PACKAGE_NAME}:id/etPassword")`),
@@ -130,7 +124,6 @@ export const PEPPER_OTP_WAIT_SELECTORS: readonly string[] = [
   '//*[@resource-id="otpScreen.phoneMessage"]',
 ];
 
-
 export const PEPPER_OTP_FOCUS_SELECTORS: readonly string[] = [
   '//*[@resource-id="accessible-rect-button"]',
   '//*[@resource-id="otp-input"]',
@@ -138,9 +131,6 @@ export const PEPPER_OTP_FOCUS_SELECTORS: readonly string[] = [
   "//android.widget.EditText[contains(@resource-id,'Otp')]",
   '//android.widget.EditText',
 ];
-
-
-
 
 /** Google Password Manager / autofill "save password?" sheet after login. */
 export const PEPPER_AUTOFILL_DISMISS_SELECTORS: readonly string[] = [
@@ -199,7 +189,6 @@ export const PEPPER_VERIFY_SELECTORS: readonly string[] = [
   uiSelector('descriptionContains("אימות")'),
   uiSelector('textContains("אשר")'),
 ];
-
 
 /** XPath predicate matching any node whose text or content-desc mentions the shekel sign. */
 export const PEPPER_SHEKEL_PREDICATE = "contains(@text,'₪') or contains(@content-desc,'₪')";
