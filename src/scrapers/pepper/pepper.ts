@@ -399,7 +399,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     return deduped.length > 0 ? deduped : undefined;
   }
 
-  private async readAccountTotals(): Promise<PepperAccountTotals | undefined> {
+  private async readAccountTotals(): Promise<PepperAccountTotals> {
     const savings = await this.ilsAmountAfterLabel('חסכונות', 1);
     const investments =
       (await this.ilsAmountAfterLabel('תיק השקעות', 1)) ?? (await this.ilsAmountAfterLabel('תיק ההשקעות', 1));
@@ -415,7 +415,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     if (foreignCurrency && foreignCurrency.length > 0) {
       totals.foreignCurrency = foreignCurrency;
     }
-    return Object.keys(totals).length > 0 ? totals : undefined;
+    return Object.keys(totals).length > 0 ? totals : {};
   }
 
   private async readAccountNumberFromProfileClipboard(): Promise<string | undefined> {
@@ -452,12 +452,12 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     return candidates.find(isLikelyPepperAccountToken);
   }
 
-  private async readAccountTotalsSafely(): Promise<PepperAccountTotals | undefined> {
+  private async readAccountTotalsSafely(): Promise<PepperAccountTotals> {
     try {
       return await this.readAccountTotals();
     } catch (error) {
       debug('readAccountTotals failed: %s', errorMessage(error));
-      return undefined;
+      return {};
     }
   }
 
