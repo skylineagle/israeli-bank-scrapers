@@ -1,6 +1,6 @@
-import { execSync, spawn, spawnSync, type ChildProcess } from 'child_process';
+import { type ChildProcess, execSync, spawn, spawnSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { remote, type Browser, type ChainablePromiseElement } from 'webdriverio';
+import { type Browser, type ChainablePromiseElement, remote } from 'webdriverio';
 import { adbDeviceTargetArgs, listAttachedEmulatorSerials, runAdbShell } from '../helpers/android-adb';
 import {
   DEFAULT_ANDROID_BASELINE_SNAPSHOT,
@@ -14,7 +14,7 @@ import { getDebug } from '../helpers/debug';
 import { stripBidirectionalAndTrim } from '../helpers/text';
 import { sleep } from '../helpers/waiting';
 import { BaseScraper } from './base-scraper';
-import { type AndroidScraperOptions, type ScraperCredentials } from './interface';
+import type { AndroidScraperOptions, ScraperCredentials } from './interface';
 
 const debug = getDebug('android-app-scraper');
 const stepsDebug = getDebug('steps');
@@ -120,7 +120,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     });
 
     await this.activateApp();
-    this.stepLog('android.session.ready', { appPackage: this.appPackage, appActivity: this.launcherActivity });
+    this.stepLog('android.session.ready', {
+      appPackage: this.appPackage,
+      appActivity: this.launcherActivity,
+    });
   }
 
   protected override async terminate(success: boolean): Promise<void> {
@@ -180,7 +183,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     selectors: readonly string[],
     timeoutMs = DEFAULT_WAIT_MS,
   ): Promise<ChainablePromiseElement> {
-    this.stepLog('waitForFirst.start', { selectorCount: selectors.length, timeoutMs });
+    this.stepLog('waitForFirst.start', {
+      selectorCount: selectors.length,
+      timeoutMs,
+    });
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       for (let index = 0; index < selectors.length; index += 1) {
@@ -201,7 +207,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   }
 
   protected async tapFirst(selectors: readonly string[], timeoutMs = DEFAULT_WAIT_MS): Promise<void> {
-    this.stepLog('tapFirst.start', { selectorCount: selectors.length, timeoutMs });
+    this.stepLog('tapFirst.start', {
+      selectorCount: selectors.length,
+      timeoutMs,
+    });
     const el = await this.waitForFirst(selectors, timeoutMs);
     await el.click();
     this.stepLog('tapFirst.done', { selectorCount: selectors.length });
@@ -219,12 +228,19 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     value: string,
     timeoutMs = DEFAULT_WAIT_MS,
   ): Promise<void> {
-    this.stepLog('typeIntoFirst.start', { selectorCount: selectors.length, valueLength: value.length, timeoutMs });
+    this.stepLog('typeIntoFirst.start', {
+      selectorCount: selectors.length,
+      valueLength: value.length,
+      timeoutMs,
+    });
     const el = await this.waitForFirst(selectors, timeoutMs);
     await el.click();
     await el.clearValue().catch(() => undefined);
     await el.setValue(value);
-    this.stepLog('typeIntoFirst.done', { selectorCount: selectors.length, valueLength: value.length });
+    this.stepLog('typeIntoFirst.done', {
+      selectorCount: selectors.length,
+      valueLength: value.length,
+    });
   }
 
   /** Quick visibility check; optional short poll when timeoutMs > 0. */
@@ -317,7 +333,9 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   }
 
   protected async pressAndroidBack(): Promise<void> {
-    const driverLike = this.driver as unknown as { pressKeyCode?: (code: number) => Promise<void> };
+    const driverLike = this.driver as unknown as {
+      pressKeyCode?: (code: number) => Promise<void>;
+    };
     if (typeof driverLike.pressKeyCode === 'function') {
       await driverLike.pressKeyCode(KEYCODE_BACK);
     } else {
@@ -327,7 +345,9 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
   }
 
   protected async readCurrentPackage(): Promise<string> {
-    const driverLike = this.driver as unknown as { getCurrentPackage?: () => Promise<string> };
+    const driverLike = this.driver as unknown as {
+      getCurrentPackage?: () => Promise<string>;
+    };
     if (typeof driverLike.getCurrentPackage !== 'function') {
       return '';
     }
@@ -363,7 +383,9 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     }
 
     debug('Activating %s (current=%s)', this.appPackage, current || '(unknown)');
-    await this.driver.execute('mobile: activateApp', { appId: this.appPackage });
+    await this.driver.execute('mobile: activateApp', {
+      appId: this.appPackage,
+    });
 
     const focused = await this.waitForCondition(async () => (await this.readCurrentPackage()) === this.appPackage, {
       timeoutMs: 8_000,
@@ -379,12 +401,18 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     const adb = adbDeviceTargetArgs();
     const pkgs = ['io.appium.uiautomator2.server', 'io.appium.uiautomator2.server.test'];
     for (const pkg of pkgs) {
-      const check = spawnSync('adb', [...adb, 'shell', 'pm', 'path', pkg], { encoding: 'utf8', timeout: 10_000 });
+      const check = spawnSync('adb', [...adb, 'shell', 'pm', 'path', pkg], {
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
       if (!(check.stdout ?? '').trim().startsWith('package:')) {
         continue;
       }
       debug('Uninstalling stale UiAutomator2 helper APK: %s', pkg);
-      spawnSync('adb', [...adb, 'shell', 'pm', 'uninstall', pkg], { encoding: 'utf8', timeout: 45_000 });
+      spawnSync('adb', [...adb, 'shell', 'pm', 'uninstall', pkg], {
+        encoding: 'utf8',
+        timeout: 45_000,
+      });
     }
   }
 
@@ -448,16 +476,26 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
     }
 
     const { sessionSnapshot } = this.resolveSnapshotNamesForAvd(avdName);
-    spawnSync('adb', ['-s', serial, 'shell', 'sync'], { encoding: 'utf8', timeout: 30_000 });
+    spawnSync('adb', ['-s', serial, 'shell', 'sync'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
 
     for (let attempt = 1; attempt <= 3; attempt += 1) {
-      this.stepLog('android.snapshot.save', { snapshot: sessionSnapshot, avdName, attempt });
+      this.stepLog('android.snapshot.save', {
+        snapshot: sessionSnapshot,
+        avdName,
+        attempt,
+      });
       const r = spawnSync('adb', ['-s', serial, 'emu', 'avd', 'snapshot', 'save', sessionSnapshot], {
         encoding: 'utf8',
         timeout: SESSION_SNAPSHOT_SAVE_TIMEOUT_MS,
       });
       if (r.status === 0 && emulatorSnapshotExists(avdName, sessionSnapshot)) {
-        this.stepLog('android.snapshot.saved', { snapshot: sessionSnapshot, avdName });
+        this.stepLog('android.snapshot.saved', {
+          snapshot: sessionSnapshot,
+          avdName,
+        });
         return true;
       }
       if (attempt < 3) {
@@ -465,14 +503,20 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
       }
     }
 
-    this.stepLog('android.snapshot.save_failed', { snapshot: sessionSnapshot, avdName });
+    this.stepLog('android.snapshot.save_failed', {
+      snapshot: sessionSnapshot,
+      avdName,
+    });
     return false;
   }
 
   private shutdownOwnedEmulator(): void {
     const serial = this.startedEmulatorSerial ?? listAttachedEmulatorSerials()[0];
     if (serial) {
-      spawnSync('adb', ['-s', serial, 'emu', 'kill'], { encoding: 'utf8', timeout: EMULATOR_SHUTDOWN_TIMEOUT_MS });
+      spawnSync('adb', ['-s', serial, 'emu', 'kill'], {
+        encoding: 'utf8',
+        timeout: EMULATOR_SHUTDOWN_TIMEOUT_MS,
+      });
     }
     if (this.emulatorProcess?.pid && !this.emulatorProcess.killed) {
       try {
@@ -515,7 +559,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
 
   private isEmulatorRunning(): boolean {
     try {
-      const output = execSync('adb devices', { encoding: 'utf8', timeout: 5_000 });
+      const output = execSync('adb devices', {
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
       return output.split('\n').some(line => /^emulator-\d+\s+device$/.test(line.trim()));
     } catch {
       return false;
@@ -524,7 +571,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
 
   private detectFirstAvd(): string | undefined {
     try {
-      const output = execSync('emulator -list-avds', { encoding: 'utf8', timeout: 5_000 });
+      const output = execSync('emulator -list-avds', {
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
       return output.trim().split('\n').filter(Boolean)[0];
     } catch {
       return undefined;
@@ -590,7 +640,10 @@ export abstract class BaseAndroidAppScraper<TCredentials extends ScraperCredenti
       emulatorArgs.push('-snapshot', loadSnapshot, '-no-snapshot-save');
     }
 
-    const proc = spawn('emulator', emulatorArgs, { detached: true, stdio: 'ignore' });
+    const proc = spawn('emulator', emulatorArgs, {
+      detached: true,
+      stdio: 'ignore',
+    });
     this.emulatorProcess = proc;
     this.registerProcessCleanup();
     proc.unref();

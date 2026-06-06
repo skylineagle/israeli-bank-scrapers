@@ -1,10 +1,10 @@
 import { getDebug } from '../../helpers/debug';
-import { sleep } from '../../helpers/waiting';
 import { stripBidirectionalAndTrim } from '../../helpers/text';
-import { type CurrencyAmount, type TransactionsAccount } from '../../transactions';
+import { sleep } from '../../helpers/waiting';
+import type { CurrencyAmount, TransactionsAccount } from '../../transactions';
 import { BaseAndroidAppScraper } from '../base-android-app-scraper';
 import { ScraperErrorTypes } from '../errors';
-import { type ScraperLoginResult, type ScraperScrapingResult } from '../interface';
+import type { ScraperLoginResult, ScraperScrapingResult } from '../interface';
 import {
   dedupeCurrencyAmounts,
   extractForeignCurrencyAmountsFromText,
@@ -16,8 +16,8 @@ import {
   toIsraeliE164Phone,
 } from './pepper-parsing';
 import {
-  PEPPER_AUTOFILL_DISMISS_SELECTORS,
   PEPPER_ACCOUNT_LINE_REGEX,
+  PEPPER_AUTOFILL_DISMISS_SELECTORS,
   PEPPER_BALANCE_AMOUNT_STRIP_REGEX,
   PEPPER_BALANCE_SELECTORS,
   PEPPER_DASHED_ACCOUNT_TOKEN_REGEX,
@@ -42,7 +42,7 @@ import {
   PEPPER_VERIFY_SELECTORS,
   PEPPER_WELCOME_CONTINUE_SELECTORS,
 } from './pepper-selectors';
-import { type PepperAccountTotals, type PepperCredentials } from './pepper-types';
+import type { PepperAccountTotals, PepperCredentials } from './pepper-types';
 
 const debug = getDebug('pepper');
 
@@ -134,7 +134,14 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
 
     return {
       success: true,
-      accounts: [{ ...accountTotals, accountNumber, balance, txns: [] } satisfies TransactionsAccount],
+      accounts: [
+        {
+          ...accountTotals,
+          accountNumber,
+          balance,
+          txns: [],
+        } satisfies TransactionsAccount,
+      ],
     };
   }
 
@@ -272,7 +279,9 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
     const foregroundPackage = await this.readCurrentPackage();
     if (foregroundPackage && foregroundPackage !== PEPPER_PACKAGE_NAME) {
       debug('Pressing back to return to Pepper (foreground was %s)', foregroundPackage);
-      this.stepLog('pepper.login.foreground_back', { package: foregroundPackage });
+      this.stepLog('pepper.login.foreground_back', {
+        package: foregroundPackage,
+      });
       await this.pressAndroidBack();
     }
   }
@@ -340,9 +349,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
           continue;
         }
         candidates.push({ amount: parsed.amount, y: location.y });
-      } catch {
-        continue;
-      }
+      } catch {}
     }
     if (candidates.length === 0) {
       return undefined;
@@ -391,9 +398,7 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
           continue;
         }
         gathered.push(...extractForeignCurrencyAmountsFromText(text));
-      } catch {
-        continue;
-      }
+      } catch {}
     }
 
     const deduped = dedupeCurrencyAmounts(gathered);
