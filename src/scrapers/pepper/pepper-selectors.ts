@@ -3,7 +3,7 @@ export const PEPPER_PACKAGE_NAME = 'com.pepper.ldb';
 export const ISRAELI_PHONE_COUNTRY_CODE = '+972';
 
 /** Build an Appium UiAutomator2 selector string from a UiSelector expression. */
-export const uiSelector = (selectorExpression: string): string => `android=new UiSelector().${selectorExpression}`;
+const uiSelector = (selectorExpression: string): string => `android=new UiSelector().${selectorExpression}`;
 
 const resourceIdSelectors = {
   phoneInput: `//android.widget.EditText[@resource-id="${PEPPER_PACKAGE_NAME}:id/etPhoneNumber"]`,
@@ -13,18 +13,6 @@ const resourceIdSelectors = {
   transactionsTab: `//android.widget.TextView[@resource-id="${PEPPER_PACKAGE_NAME}:id/tvTransactions"]`,
 } as const;
 
-export const PEPPER_BOTTOM_NAV_HOME_SELECTORS: readonly string[] = [
-  '//android.view.View[@content-desc="בית"][@clickable="true"]',
-  '//*[@content-desc="בית"][@clickable="true"]',
-];
-
-export const PEPPER_HOME_TAB_SELECTORS: readonly string[] = [
-  ...PEPPER_BOTTOM_NAV_HOME_SELECTORS,
-  '//android.widget.TextView[@text="בית"]',
-  '//*[@text="בית" and (@clickable="true" or @focusable="true")]',
-  uiSelector('textContains("בית").clickable(true)'),
-  uiSelector('descriptionContains("בית")'),
-];
 
 export const PEPPER_HOME_DASHBOARD_READY_SELECTORS: readonly string[] = [
   '//android.widget.Button[contains(@text,"זאת היתרה")]',
@@ -46,24 +34,6 @@ export const PEPPER_PROFILE_SCREEN_SELECTORS: readonly string[] = [
   '//*[contains(@text,"מספר חשבון") or contains(@content-desc,"מספר חשבון")]',
 ];
 
-export const PEPPER_LOGGED_IN_SELECTORS: readonly string[] = [
-  ...PEPPER_HOME_DASHBOARD_READY_SELECTORS,
-  ...PEPPER_BOTTOM_NAV_HOME_SELECTORS,
-  uiSelector('textContains("זאת היתרה")'),
-  uiSelector('textContains("יתרה שלך")'),
-  '//android.widget.TextView[contains(@text,"יתרה שלך")]',
-  '//*[contains(@text,"תנועות אחרונות")]',
-  uiSelector('textContains("תנועות אחרונות")'),
-  '//*[contains(@text,"העברת כסף")]',
-  uiSelector('textContains("העברת כסף")'),
-  uiSelector(`resourceIdMatches("${PEPPER_PACKAGE_NAME}:id/.*[Bb]alance.*").className("android.widget.TextView")`),
-  `//*[contains(@resource-id,'${PEPPER_PACKAGE_NAME}:id/')][contains(@resource-id,'Balance')]`,
-  '//*[@text="פעולות"]',
-  uiSelector('textContains("פעולות").clickable(true)'),
-  resourceIdSelectors.transactionsTab,
-  uiSelector(`resourceId("${PEPPER_PACKAGE_NAME}:id/tvTransactions")`),
-  uiSelector('descriptionContains("יתרה")'),
-];
 
 export const PEPPER_BALANCE_SELECTORS: readonly string[] = [
   "//*[contains(@resource-id,'Balance')]",
@@ -92,11 +62,7 @@ export const PEPPER_PHONE_SELECTORS_STRICT: readonly string[] = [
   uiSelector('resourceIdMatches("(?i).*phone.*").className("android.widget.EditText")'),
 ];
 
-export const PEPPER_PHONE_SELECTORS: readonly string[] = [
-  ...PEPPER_PHONE_SELECTORS_STRICT,
-  uiSelector('descriptionContains("טלפון")'),
-  uiSelector('descriptionContains("נייד")'),
-];
+
 
 /** First-launch marketing screen — tap to reach the phone/password login form. */
 export const PEPPER_WELCOME_CONTINUE_SELECTORS: readonly string[] = [
@@ -119,37 +85,7 @@ export const PEPPER_WELCOME_CONTINUE_SELECTORS: readonly string[] = [
   "//android.widget.Button[contains(@resource-id,'start')]",
 ];
 
-export const PEPPER_CONTINUE_SELECTORS: readonly string[] = [
-  resourceIdSelectors.continueButton,
-  uiSelector('classNameContains("FloatingActionButton").clickable(true)'),
-  uiSelector('resourceIdMatches("(?i).*fab.*").clickable(true)'),
-  uiSelector('resourceIdMatches("(?i).*next.*").clickable(true)'),
-  uiSelector('resourceIdMatches("(?i).*submit.*").clickable(true)'),
-  uiSelector('descriptionMatches("(?i).*next.*")'),
-  uiSelector('descriptionMatches("(?i).*arrow.*")'),
-  uiSelector('descriptionContains("הבא")'),
-  uiSelector('descriptionContains("המשך")'),
-  uiSelector('resourceIdMatches("(?i).*continue.*").clickable(true)'),
-  uiSelector('textMatches("(?i).*continue.*")'),
-  '//android.widget.Button[@text="המשך"]',
-  '//*[@text="המשך"]',
-  uiSelector('textContains("המשך")'),
-  uiSelector('textContains("הבא")'),
-];
-
-export const PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS: readonly string[] = [
-  '//*[@text="כניסה לחשבון"]',
-  "//android.widget.Button[contains(@text,'כניסה לחשבון')]",
-  uiSelector('textContains("כניסה לחשבון")'),
-  uiSelector('descriptionContains("כניסה לחשבון")'),
-  resourceIdSelectors.continueButton,
-  uiSelector('resourceIdMatches("(?i).*login.*").clickable(true)'),
-  uiSelector('resourceIdMatches("(?i).*signin.*").clickable(true)'),
-  uiSelector('resourceIdMatches("(?i).*sign_in.*").clickable(true)'),
-  uiSelector('classNameContains("FloatingActionButton").clickable(true)'),
-  uiSelector('resourceIdMatches("(?i).*fab.*").clickable(true)'),
-  uiSelector('resourceIdMatches("(?i).*submit.*").clickable(true)'),
-];
+ 
 
 export const PEPPER_PASSWORD_SELECTORS: readonly string[] = [
   uiSelector(`resourceId("${PEPPER_PACKAGE_NAME}:id/etPassword")`),
@@ -161,14 +97,14 @@ export const PEPPER_PASSWORD_SELECTORS: readonly string[] = [
   '//android.widget.EditText[@password="true"]',
 ];
 
-export const PEPPER_INVALID_CREDENTIALS_MESSAGE_SELECTORS: readonly string[] = [
+const PEPPER_INVALID_CREDENTIALS_MESSAGE_SELECTORS: readonly string[] = [
   uiSelector('textContains("אחד או יותר מהפרטים לא נכונים")'),
   uiSelector('descriptionContains("אחד או יותר מהפרטים לא נכונים")'),
   '//*[contains(@text,"אחד או יותר מהפרטים לא נכונים")]',
   '//*[contains(@content-desc,"אחד או יותר מהפרטים לא נכונים")]',
 ];
 
-export const PEPPER_INVALID_CREDENTIALS_BACK_SELECTORS: readonly string[] = [
+const PEPPER_INVALID_CREDENTIALS_BACK_SELECTORS: readonly string[] = [
   '//*[@text="חזרה להתחברות"]',
   "//android.widget.Button[contains(@text,'חזרה להתחברות')]",
   uiSelector('text("חזרה להתחברות")'),
@@ -194,15 +130,6 @@ export const PEPPER_OTP_WAIT_SELECTORS: readonly string[] = [
   '//*[@resource-id="otpScreen.phoneMessage"]',
 ];
 
-export const PEPPER_OTP_INPUT_SELECTORS: readonly string[] = [
-  '//*[@resource-id="otp-input"]',
-  '//*[@resource-id="accessible-rect-button"]',
-  '//*[@resource-id="otpScreen.phoneMessage"]',
-  resourceIdSelectors.otpInput,
-  "//android.widget.EditText[contains(@resource-id,'otp')]",
-  "//android.widget.EditText[contains(@resource-id,'Otp')]",
-  uiSelector('resourceIdMatches("(?i).*otp.*").className("android.widget.EditText")'),
-];
 
 export const PEPPER_OTP_FOCUS_SELECTORS: readonly string[] = [
   '//*[@resource-id="accessible-rect-button"]',
@@ -212,15 +139,8 @@ export const PEPPER_OTP_FOCUS_SELECTORS: readonly string[] = [
   '//android.widget.EditText',
 ];
 
-export const PEPPER_OTP_SCREEN_MARKERS: readonly string[] = [
-  '//*[@resource-id="otpScreen.phoneMessage"]',
-  uiSelector('textContains("שלחנו לך קוד")'),
-  uiSelector('textContains("מה הקוד שקיבלת")'),
-  uiSelector('textContains("קוד האימות")'),
-  uiSelector('descriptionContains("קוד האימות")'),
-  uiSelector('textContains("הקוד לא הגיע")'),
-  uiSelector('textContains("הודעה קולית")'),
-];
+
+
 
 /** Google Password Manager / autofill "save password?" sheet after login. */
 export const PEPPER_AUTOFILL_DISMISS_SELECTORS: readonly string[] = [
@@ -280,10 +200,6 @@ export const PEPPER_VERIFY_SELECTORS: readonly string[] = [
   uiSelector('textContains("אשר")'),
 ];
 
-export const PEPPER_LOGIN_SUBMIT_TEXT_SELECTORS: readonly string[] = [
-  '//*[@text="כניסה לחשבון"]',
-  uiSelector('textContains("כניסה לחשבון")'),
-];
 
 /** XPath predicate matching any node whose text or content-desc mentions the shekel sign. */
 export const PEPPER_SHEKEL_PREDICATE = "contains(@text,'₪') or contains(@content-desc,'₪')";

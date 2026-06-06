@@ -196,21 +196,3 @@ export function toIsraeliDialerDigits(e164LikePhone: string): string {
   }
   return digits;
 }
-
-/** True when two phone strings refer to the same number, tolerating country-code/leading-zero differences. */
-export function phoneDigitsMatch(existingRaw: string, wantedDialDigits: string): boolean {
-  const existing = existingRaw.replace(/\D/g, '');
-  const wanted = wantedDialDigits.replace(/\D/g, '');
-  if (!wanted.length) {
-    return false;
-  }
-  if (existing === wanted) {
-    return true;
-  }
-  if (existing.length >= 9 && wanted.length >= 9) {
-    const existingSuffix = existing.slice(-9);
-    const wantedSuffix = wanted.slice(-9);
-    return existingSuffix === wantedSuffix || existing.endsWith(wantedSuffix) || wanted.endsWith(existingSuffix);
-  }
-  return false;
-}

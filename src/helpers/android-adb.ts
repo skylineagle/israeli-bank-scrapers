@@ -17,7 +17,7 @@ function readAdbDevicesLines(timeoutMs: number): string[] {
 }
 
 /** Serials of every attached adb target (emulators and physical devices) reporting `device` state. */
-export function listAdbDeviceSerials(): string[] {
+function listAdbDeviceSerials(): string[] {
   return readAdbDevicesLines(2_000)
     .filter(line => /\S+\s+device$/.test(line) && !line.startsWith('List'))
     .map(line => line.split(/\s+/)[0]);
