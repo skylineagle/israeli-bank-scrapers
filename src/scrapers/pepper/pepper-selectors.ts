@@ -5,8 +5,6 @@ export const ISRAELI_PHONE_COUNTRY_CODE = '+972';
 /** Build an Appium UiAutomator2 selector string from a UiSelector expression. */
 export const uiSelector = (selectorExpression: string): string => `android=new UiSelector().${selectorExpression}`;
 
-export const LOGIN_UI_WAIT_MS = 35_000;
-
 const resourceIdSelectors = {
   phoneInput: `//android.widget.EditText[@resource-id="${PEPPER_PACKAGE_NAME}:id/etPhoneNumber"]`,
   otpInput: `//android.widget.EditText[@resource-id="${PEPPER_PACKAGE_NAME}:id/etOtp"]`,
@@ -100,10 +98,16 @@ export const PEPPER_PHONE_SELECTORS: readonly string[] = [
   uiSelector('descriptionContains("נייד")'),
 ];
 
+/** First-launch marketing screen — tap to reach the phone/password login form. */
 export const PEPPER_WELCOME_CONTINUE_SELECTORS: readonly string[] = [
+  '//*[@text="כניסה לחשבון שלי"]',
+  '//*[contains(@text,"כניסה לחשבון שלי")]',
+  '//android.widget.Button[@text="כניסה לחשבון שלי"]',
+  '//android.widget.Button[contains(@text,"כניסה לחשבון שלי")]',
+  '//*[@content-desc="כניסה לחשבון שלי"]',
+  '//*[contains(@content-desc,"כניסה לחשבון שלי")]',
   uiSelector('text("כניסה לחשבון שלי")'),
   uiSelector('descriptionContains("כניסה לחשבון שלי")'),
-  '//*[@content-desc="כניסה לחשבון שלי"]',
   uiSelector('textContains("לחשבון שלי")'),
   uiSelector('text("כניסה")'),
   uiSelector('textContains("יש לי חשבון")'),
@@ -183,6 +187,13 @@ export const PEPPER_INVALID_CREDENTIALS_SCREEN_SELECTORS: readonly string[] = [
  *   (b) Standard single EditText with 6 underline positions + system soft keyboard.
  * Both are detected here; entry is handled by PepperScraper.enterOtpCode().
  */
+/** Fast-path selectors polled after password entry (Pepper auto-advances to OTP). */
+export const PEPPER_OTP_WAIT_SELECTORS: readonly string[] = [
+  '//*[@resource-id="otp-input"]',
+  '//*[@resource-id="accessible-rect-button"]',
+  '//*[@resource-id="otpScreen.phoneMessage"]',
+];
+
 export const PEPPER_OTP_INPUT_SELECTORS: readonly string[] = [
   '//*[@resource-id="otp-input"]',
   '//*[@resource-id="accessible-rect-button"]',
@@ -209,6 +220,20 @@ export const PEPPER_OTP_SCREEN_MARKERS: readonly string[] = [
   uiSelector('descriptionContains("קוד האימות")'),
   uiSelector('textContains("הקוד לא הגיע")'),
   uiSelector('textContains("הודעה קולית")'),
+];
+
+/** Google Password Manager / autofill "save password?" sheet after login. */
+export const PEPPER_AUTOFILL_DISMISS_SELECTORS: readonly string[] = [
+  '//*[@text="Not now"]',
+  '//*[@content-desc="Not now"]',
+  uiSelector('text("Not now")'),
+  uiSelector('textContains("Not now")'),
+  uiSelector('descriptionContains("Not now")'),
+  '//*[@text="לא עכשיו"]',
+  uiSelector('textContains("לא עכשיו")'),
+  '//*[@text="Never"]',
+  uiSelector('text("Never")'),
+  uiSelector('textContains("Never")'),
 ];
 
 export const PEPPER_NOTIFICATION_POPUP_SELECTORS: readonly string[] = [
