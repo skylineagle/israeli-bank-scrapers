@@ -392,21 +392,6 @@ export default class PepperScraper extends BaseAndroidAppScraper<PepperCredentia
       return;
     }
 
-    try {
-      await this.tapAny(PEPPER_POST_CREDENTIALS_SUBMIT_SELECTORS, 14_000);
-    } catch (error) {
-      // An overlay may have appeared during the tap — dismiss it and re-check the app state.
-      await this.ensureForeground();
-      if (await this.isOtpPhaseVisible()) {
-        debug('OTP appeared (was obscured by overlay)');
-        return;
-      }
-      if (await this.isAnyVisible(PEPPER_LOGGED_IN_SELECTORS, 3_000)) {
-        debug('Home visible after sign-in button timeout — continuing');
-        return;
-      }
-      throw error;
-    }
   }
 
   private async isInvalidCredentialsScreen(): Promise<boolean> {
