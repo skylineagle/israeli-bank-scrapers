@@ -1,7 +1,7 @@
-import { type BrowserContext, type Browser, type Page } from 'puppeteer';
-import { type CompanyTypes, type ScraperProgressTypes } from '../definitions';
-import { type TransactionsAccount } from '../transactions';
-import { type ErrorResult, type ScraperErrorTypes } from './errors';
+import type { Browser, BrowserContext, Page } from 'puppeteer';
+import type { CompanyTypes, ScraperProgressTypes } from '../definitions';
+import type { TransactionsAccount } from '../transactions';
+import type { ErrorResult, ScraperErrorTypes } from './errors';
 
 // TODO: Remove this type when the scraper 'factory' will return concrete scraper types
 // Instead of a generic interface (which in turn uses this type)
@@ -20,7 +20,12 @@ export type ScraperCredentials =
       | {
           otpLongTermToken: string;
         }
-    ));
+    ))
+  | {
+      phoneNumber: string;
+      password: string;
+      otpCodeRetriever?: () => Promise<string>;
+    };
 
 export type OptInFeatures =
   | 'isracard-amex:skipAdditionalTransactionInformation'
@@ -92,6 +97,63 @@ interface DefaultBrowserOptions {
 }
 
 type ScraperBrowserOptions = ExternalBrowserOptions | ExternalBrowserContextOptions | DefaultBrowserOptions;
+
+export interface AndroidScraperOptions {
+  /**
+   * Android Virtual Device name to launch if no emulator is currently running.
+   * Only used by Android app scrapers (e.g. Pepper).
+   * If omitted, the first available AVD is used. Run `emulator -list-avds` to see options.
+   * The scraper starts the emulator headless (`-no-window`) by default. Set DEBUG_ANDROID_EMULATOR_GUI=1 to show the emulator window.
+   */
+  avdName?: string;
+
+  /**
+   * Port for the Appium server. Only used by Android app scrapers (e.g. Pepper).
+   * @default 4723
+   */
+  appiumPort?: number;
+
+  /**
+   * When the scraper launched an Android emulator itself, shut it down after terminate() (adb emu kill).
+   * No effect when an emulator was already running before ensureEmulatorRunning().
+   * @default true
+   */
+  shutdownEmulatorOnTerminate?: boolean;
+
+  /**
+   * AVD snapshot name to load when the scraper starts the emulator.
+   * When omitted, loads `sessionSnapshotName` if that snapshot exists on the AVD, otherwise `baselineSnapshotName`.
+   * Set ANDROID_COLD_BOOT=1 to skip snapshots and force a full cold boot instead.
+   */
+  snapshotName?: string;
+
+  /**
+   * Clean AVD snapshot (Pepper installed, logged out). Used on first run and when forcing a reset.
+   * @default scraper-baseline
+   */
+  baselineSnapshotName?: string;
+
+  /**
+   * Persisted logged-in emulator state. Created automatically after a successful scrape when
+   * `persistEmulatorSession` is true (default). Subsequent runs load this snapshot to skip OTP.
+   * @default scraper-session
+   */
+  sessionSnapshotName?: string;
+
+  /**
+   * After a successful scrape (login + fetchData), save the current emulator RAM state to
+   * `sessionSnapshotName` before shutting down. The next cold start loads that snapshot instead
+   * of `baselineSnapshotName`, so OTP is usually skipped. Set ANDROID_NO_SESSION_SNAPSHOT=1 to disable.
+   * @default true
+   */
+  persistEmulatorSession?: boolean;
+
+  /**
+   * Always boot from `baselineSnapshotName` (ignore any saved session snapshot).
+   * Set ANDROID_FORCE_BASELINE=1 for the same behavior via environment variable.
+   */
+  forceBaselineSnapshot?: boolean;
+}
 
 export type ScraperOptions = ScraperBrowserOptions & {
   /**
@@ -171,7 +233,7 @@ export type ScraperOptions = ScraperBrowserOptions & {
    * Opt-in features for the scrapers, allowing safe rollout of new breaking changes.
    */
   optInFeatures?: Array<OptInFeatures>;
-};
+} & Partial<AndroidScraperOptions>;
 
 export interface OutputDataOptions {
   /**

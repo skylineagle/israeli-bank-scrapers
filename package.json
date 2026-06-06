@@ -14,7 +14,7 @@
   "types": "lib/index.d.ts",
   "scripts": {
     "clean": "rimraf lib",
-    "test": "jest",
+    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest",
     "test:ci": "ncp src/tests/.tests-config.tpl.js src/tests/.tests-config.js && npm run test",
     "lint": "eslint src && npm run format:check",
     "lint:fix": "eslint src --fix && npm run format",
@@ -78,7 +78,8 @@
     "debug": "^4.3.2",
     "moment": "^2.22.2",
     "moment-timezone": "^0.5.37",
-    "puppeteer": "^24.40.0"
+    "puppeteer": "^24.40.0",
+    "webdriverio": "^9.27.1"
   },
   "files": [
     "lib/**/*"

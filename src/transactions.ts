@@ -1,6 +1,14 @@
+export interface CurrencyAmount {
+  amount: number;
+  currency: string;
+}
+
 export interface TransactionsAccount {
   accountNumber: string;
   balance?: number;
+  savings?: number;
+  investments?: number;
+  foreignCurrency?: CurrencyAmount[];
   txns: Transaction[];
 }
 
